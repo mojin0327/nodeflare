@@ -5,9 +5,10 @@ import { useTranslations } from 'next-intl';
 import { Header, Footer } from '@/components/layout';
 import Link from 'next/link';
 
-// Technical documentation for NodeFlare's internals (builder / adapter / proxy / runner).
-// Prose is localized via the `docs` i18n namespace; code blocks and the architecture
-// diagram are language-neutral and live inline here.
+// Technical documentation for NodeFlare's internals (builder / adapter / proxy /
+// hosting / runner). Prose is localized via the `docs` i18n namespace; code blocks
+// and the architecture diagram are language-neutral and live inline here.
+// Design is intentionally monochrome — no accent colors.
 
 type SectionKey =
   | 'overview'
@@ -17,6 +18,7 @@ type SectionKey =
   | 'proxy'
   | 'tokens'
   | 'code'
+  | 'hosting'
   | 'security';
 
 const NAV: { id: string; key: SectionKey }[] = [
@@ -27,12 +29,13 @@ const NAV: { id: string; key: SectionKey }[] = [
   { id: 'proxy', key: 'proxy' },
   { id: 'tokens', key: 'tokens' },
   { id: 'code', key: 'code' },
+  { id: 'hosting', key: 'hosting' },
   { id: 'security', key: 'security' },
 ];
 
 function Code({ children }: { children: string }) {
   return (
-    <pre className="my-5 overflow-x-auto rounded-xl border border-gray-800 bg-gray-950 p-4 text-[13px] leading-relaxed text-gray-100">
+    <pre className="my-5 overflow-x-auto rounded-lg border border-gray-300 bg-gray-900 p-4 text-[13px] leading-relaxed text-gray-100">
       <code className="font-mono whitespace-pre">{children}</code>
     </pre>
   );
@@ -40,9 +43,22 @@ function Code({ children }: { children: string }) {
 
 function Diagram({ children }: { children: string }) {
   return (
-    <pre className="my-6 overflow-x-auto rounded-xl border border-violet-200 bg-violet-50/50 p-4 text-[12px] leading-snug text-violet-950">
+    <pre className="my-6 overflow-x-auto rounded-lg border border-gray-300 bg-gray-50 p-4 text-[12px] leading-snug text-gray-800">
       <code className="font-mono whitespace-pre">{children}</code>
     </pre>
+  );
+}
+
+/** Benefit callout — answers "so what?" for a section. */
+function Why({ text }: { text: string }) {
+  const t = useTranslations('docs');
+  return (
+    <div className="my-6 border-l-2 border-gray-900 bg-gray-50 pl-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+        {t('whyLabel')}
+      </p>
+      <p className="text-sm text-gray-800 leading-relaxed">{text}</p>
+    </div>
   );
 }
 
@@ -76,12 +92,12 @@ function Paras({ items }: { items: string[] }) {
   );
 }
 
-/** term/desc cards used for adapter & proxy capability grids. */
+/** term/desc cards used for capability grids. */
 function FeatureGrid({ items }: { items: { t: string; d: string }[] }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 my-6">
       {items.map((f, i) => (
-        <div key={i} className="rounded-xl border border-gray-200 p-4">
+        <div key={i} className="rounded-lg border border-gray-200 p-4">
           <p className="font-semibold text-gray-900 mb-1">{f.t}</p>
           <p className="text-sm text-gray-600 leading-relaxed">{f.d}</p>
         </div>
@@ -96,7 +112,7 @@ function Steps({ items }: { items: { t: string; d: string }[] }) {
     <ol className="my-6 space-y-4">
       {items.map((s, i) => (
         <li key={i} className="flex gap-4">
-          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-violet-100 text-violet-700 text-sm font-bold flex items-center justify-center">
+          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-gray-900 text-white text-sm font-bold flex items-center justify-center">
             {i + 1}
           </span>
           <div className="min-w-0">
@@ -164,10 +180,10 @@ export default function DocsPage() {
                 <button
                   key={id}
                   onClick={() => scrollToSection(id)}
-                  className={`block w-full text-left px-3 py-2 text-sm transition-colors ${
+                  className={`block w-full text-left px-3 py-2 text-sm border-l-2 transition-colors ${
                     activeSection === id
-                      ? 'text-gray-900 font-medium'
-                      : 'text-gray-400 hover:text-gray-600'
+                      ? 'border-gray-900 text-gray-900 font-medium'
+                      : 'border-transparent text-gray-400 hover:text-gray-700'
                   }`}
                 >
                   {t(`nav.${key}`)}
@@ -190,7 +206,7 @@ export default function DocsPage() {
                 {raw<string[]>('sec.overview.badges', []).map((b, i) => (
                   <span
                     key={i}
-                    className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-sm font-medium text-violet-700"
+                    className="inline-flex items-center rounded-full border border-gray-300 bg-gray-100 px-3 py-1 text-sm font-medium text-gray-700"
                   >
                     {b}
                   </span>
@@ -214,7 +230,7 @@ export default function DocsPage() {
         ▼
  ┌──────────────────────────────────────────────┐
  │  stdio-adapter.cjs  (Node, injected at build) │
- │  stdin/stdout  ⇄  Streamable HTTP             │
+ │  stdin/stdout  <->  Streamable HTTP           │
  └───────────────────────┬──────────────────────┘
         │   JSON-RPC over stdio
         ▼
@@ -223,8 +239,8 @@ export default function DocsPage() {
  │  node · python · go · rust · docker           │
  └──────────────────────────────────────────────┘
 
- BUILDER (Rust)  GitHub repo → detect → Dockerfile → Fly image → deploy → verify initialize
- RUNNER  (Deno)  run_code → Firecracker sandbox → tools.* → proxy (scope re-checked per call)`}</Diagram>
+ BUILDER (Rust)  GitHub repo -> detect -> Dockerfile -> Fly image -> deploy -> verify initialize
+ RUNNER  (Deno)  run_code -> Firecracker sandbox -> tools.* -> proxy (scope re-checked per call)`}</Diagram>
               <p className="text-sm text-gray-500">{t('sec.architecture.caption')}</p>
             </Section>
 
@@ -233,16 +249,17 @@ export default function DocsPage() {
               <Paras items={raw<string[]>('sec.builder.p', [])} />
               <Steps items={raw<{ t: string; d: string }[]>('sec.builder.steps', [])} />
               <Code>{`# What the Builder emits for a stdio MCP server (any language):
-CMD ["node", "stdio-adapter.cjs", "npm", "start"]        # Node
+CMD ["node", "stdio-adapter.cjs", "npm", "start"]         # Node
 CMD ["node", "stdio-adapter.cjs", "python", "server.py"]  # Python
 CMD ["node", "stdio-adapter.cjs", "./server"]             # Go / Rust binary
 CMD ["node", "stdio-adapter.cjs", "npx", "-y", "pkg"]     # npx package`}</Code>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <div className="rounded-lg border border-gray-300 bg-gray-50 p-4 text-sm text-gray-700">
                 {t('sec.builder.note')}
               </div>
+              <Why text={t('sec.builder.why')} />
             </Section>
 
-            {/* stdio → HTTP adapter */}
+            {/* stdio -> HTTP adapter */}
             <Section id="adapter" title={t('sec.adapter.title')}>
               <Paras items={raw<string[]>('sec.adapter.p', [])} />
               <Code>{`// Each client request gets a private JSON-RPC id, so concurrent
@@ -254,6 +271,7 @@ child.stdin.write(JSON.stringify({ ...msg, id: internalId }) + "\\n");
 // Health: /health returns 503 once the restart budget is spent,
 // so Fly marks the machine unhealthy instead of silently 500-ing.`}</Code>
               <FeatureGrid items={raw<{ t: string; d: string }[]>('sec.adapter.features', [])} />
+              <Why text={t('sec.adapter.why')} />
             </Section>
 
             {/* Proxy */}
@@ -267,6 +285,7 @@ tools:call               call any tool
 tools:call:get_weather   call only the get_weather tool
 resources:read:<uri>     read one specific resource
 prompts:get:<name>       get one specific prompt`}</Code>
+              <Why text={t('sec.proxy.why')} />
             </Section>
 
             {/* Token-optimization features */}
@@ -274,8 +293,8 @@ prompts:get:<name>       get one specific prompt`}</Code>
               <Paras items={raw<string[]>('sec.tokens.p', [])} />
               <div className="my-6 space-y-4">
                 {raw<{ flag: string; t: string; d: string }[]>('sec.tokens.items', []).map((it, i) => (
-                  <div key={i} className="rounded-xl border border-gray-200 p-4">
-                    <code className="inline-block rounded bg-gray-900 px-2 py-0.5 text-[13px] font-mono text-emerald-300 mb-2">
+                  <div key={i} className="rounded-lg border border-gray-200 p-4">
+                    <code className="inline-block rounded bg-gray-900 px-2 py-0.5 text-[13px] font-mono text-gray-100 mb-2">
                       {it.flag}
                     </code>
                     <p className="font-semibold text-gray-900">{it.t}</p>
@@ -283,6 +302,7 @@ prompts:get:<name>       get one specific prompt`}</Code>
                   </div>
                 ))}
               </div>
+              <Why text={t('sec.tokens.why')} />
             </Section>
 
             {/* Code mode + runner */}
@@ -297,9 +317,17 @@ const details = await Promise.all(
 );
 return details.filter(d => d.likeToViewRatio > 0.04);`}</Code>
               <Steps items={raw<{ t: string; d: string }[]>('sec.code.steps', [])} />
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
                 {t('sec.code.limits')}
               </div>
+              <Why text={t('sec.code.why')} />
+            </Section>
+
+            {/* Hosting model */}
+            <Section id="hosting" title={t('sec.hosting.title')}>
+              <Paras items={raw<string[]>('sec.hosting.p', [])} />
+              <FeatureGrid items={raw<{ t: string; d: string }[]>('sec.hosting.features', [])} />
+              <Why text={t('sec.hosting.why')} />
             </Section>
 
             {/* Security */}
@@ -308,7 +336,7 @@ return details.filter(d => d.likeToViewRatio > 0.04);`}</Code>
               <ul className="space-y-2">
                 {raw<string[]>('sec.security.points', []).map((p, i) => (
                   <li key={i} className="flex items-start gap-2 text-gray-600">
-                    <span className="text-emerald-500 mt-1">✓</span>
+                    <span className="text-gray-900 mt-1 font-bold">✓</span>
                     <span>{p}</span>
                   </li>
                 ))}
@@ -318,7 +346,7 @@ return details.filter(d => d.likeToViewRatio > 0.04);`}</Code>
             {/* Contact */}
             <div className="mt-12 pt-8 border-t">
               <p className="text-gray-600 mb-4">{t('contact.prompt')}</p>
-              <Link href="/contact" className="text-violet-600 font-medium hover:underline">
+              <Link href="/contact" className="text-gray-900 font-medium underline underline-offset-4 hover:text-gray-600">
                 {t('contact.link')}
               </Link>
             </div>
