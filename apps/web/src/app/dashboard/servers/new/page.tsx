@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound, Wand2, Loader2, RefreshCw } from 'lucide-react';
+import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getLinkedAccounts, getRepos, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
 import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo } from '@/types';
@@ -112,14 +112,11 @@ export default function NewServerPage() {
     setEnvVars((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Auto-detect deploy config from the repo (Vercel-style). The backend inspects the
-  // repo with the same algorithm the builder uses, so the values shown are what will
-  // actually build; every field stays editable afterwards.
-  const [detected, setDetected] = useState<RepoDetection | null>(null);
+  // Auto-detect deploy config from the repo (Vercel-style): silently pre-fill the fields
+  // below with the same values the builder will use. Every field stays editable.
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyDetection = useCallback((d: RepoDetection) => {
-    setDetected(d);
     setFormData((prev) => ({
       ...prev,
       runtime: d.runtime ?? prev.runtime,
@@ -230,7 +227,7 @@ export default function NewServerPage() {
       if (detectTimer.current) clearTimeout(detectTimer.current);
       detectTimer.current = setTimeout(() => {
         runDetect(`${parsed.owner}/${parsed.repo}`, parsed.branch || 'main', parsed.subdir);
-      }, 700);
+      }, 350);
     } else {
       setPublicRepoError('Invalid format. Use owner/repo or full GitHub URL');
       setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
@@ -589,43 +586,6 @@ export default function NewServerPage() {
               {t('create.advancedSettings')}
             </div>
 
-            {/* Auto-detect: inspect the repo and pre-fill the fields below (editable). */}
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <div className="flex items-start gap-3">
-                <Wand2 className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{t('create.autoDetectTitle')}</p>
-                  {inspectMutation.isPending ? (
-                    <p className="text-xs text-gray-500 mt-1">{t('create.autoDetectRunning')}</p>
-                  ) : inspectMutation.isError ? (
-                    <p className="text-xs text-amber-600 mt-1">{t('create.autoDetectError')}</p>
-                  ) : detected ? (
-                    <p className="text-xs text-gray-500 mt-1">
-                      {t('create.autoDetectDone')}
-                      {detected.is_monorepo_member ? ` · ${t('create.autoDetectMonorepo')}` : ''}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-gray-500 mt-1">{t('create.autoDetectIdle')}</p>
-                  )}
-                  {detected?.warnings?.map((w, i) => (
-                    <p key={i} className="text-xs text-amber-600 mt-1">{w}</p>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => runDetect(formData.github_repo, formData.github_branch || 'main', formData.root_directory || undefined)}
-                  disabled={!formData.github_repo || inspectMutation.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex-shrink-0"
-                >
-                  {inspectMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4" />
-                  )}
-                  {t('create.autoDetectButton')}
-                </button>
-              </div>
-            </div>
 
             <div className="space-y-4">
                 <div>

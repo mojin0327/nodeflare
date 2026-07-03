@@ -3,10 +3,15 @@
 //! algorithm over the GitHub Contents API — the same algorithm the builder runs over the
 //! cloned repo — so what the form shows is what will actually build.
 //!
+//! Speed: the whole file list is fetched ONCE via the recursive git-tree API, so
+//! `exists()` is an in-memory lookup (no network) and `read()` skips files that aren't in
+//! the tree. That collapses the detector's dozens of existence probes into a single tree
+//! request plus a handful of content fetches — the reason this feels instant.
+//!
 //! Auth uses the caller's linked-account OAuth token (as `list_repositories` does), so it
 //! reads public repos and the user's own private repos without a GitHub App installation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -34,15 +39,31 @@ pub struct InspectRequest {
     pub root_directory: Option<String>,
 }
 
-/// [`RepoFiles`] backed by the GitHub Contents API using a user OAuth token. Fetches are
-/// memoized per path so an `exists` + `read` of the same file costs one request, and the
-/// bounded set of probes `mcp_detect` makes stays well under the API rate limit.
+#[derive(Deserialize)]
+struct TreeResponse {
+    #[serde(default)]
+    tree: Vec<TreeEntry>,
+    #[serde(default)]
+    truncated: bool,
+}
+
+#[derive(Deserialize)]
+struct TreeEntry {
+    path: String,
+}
+
+/// [`RepoFiles`] backed by the GitHub API. The recursive git tree (all paths) is
+/// pre-loaded so `exists` never touches the network; content is fetched lazily and
+/// memoized per path. If the tree came back truncated (very large repos), `exists`/`read`
+/// fall back to a live fetch so correctness is preserved.
 struct GitHubFiles {
     client: reqwest::Client,
     token: String,
     owner: String,
     repo: String,
     branch: String,
+    paths: HashSet<String>,
+    truncated: bool,
     cache: Mutex<HashMap<String, Option<String>>>,
 }
 
@@ -59,8 +80,7 @@ impl GitHubFiles {
             .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
-            // `raw` returns file bytes directly (no base64 wrapper). Directories return
-            // JSON, which we treat as "not a readable file" — the detector only reads files.
+            // `raw` returns file bytes directly (no base64 wrapper).
             .header("Accept", "application/vnd.github.raw+json")
             .header("User-Agent", "NodeFlare/1.0")
             .send()
@@ -77,13 +97,56 @@ impl GitHubFiles {
 #[async_trait]
 impl RepoFiles for GitHubFiles {
     async fn read(&self, path: &str) -> Option<String> {
+        // Skip the network entirely for files the tree says don't exist.
+        if !self.truncated && !self.paths.contains(path) {
+            return None;
+        }
         self.fetch(path).await
     }
+
     async fn exists(&self, path: &str) -> bool {
-        self.fetch(path).await.is_some()
+        if self.paths.contains(path) {
+            return true;
+        }
+        // Truncated tree: the path might exist but be missing from the partial list.
+        self.truncated && self.fetch(path).await.is_some()
     }
+
     async fn list_dir(&self, _path: &str) -> Vec<String> {
         Vec::new()
+    }
+}
+
+/// Fetch the repo's recursive git tree once. Returns (all paths, truncated). On any
+/// failure, returns an empty set marked truncated so the detector falls back to live
+/// probes (slower, but still correct).
+async fn load_tree(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> (HashSet<String>, bool) {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
+        owner, repo, branch
+    );
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "NodeFlare/1.0")
+        .send()
+        .await;
+    match resp {
+        Ok(r) if r.status().is_success() => match r.json::<TreeResponse>().await {
+            Ok(tree) => (
+                tree.tree.into_iter().map(|e| e.path).collect(),
+                tree.truncated,
+            ),
+            Err(_) => (HashSet::new(), true),
+        },
+        _ => (HashSet::new(), true),
     }
 }
 
@@ -137,12 +200,17 @@ pub async fn inspect(
         .map(|s| s.trim().trim_matches('/'))
         .filter(|s| !s.is_empty());
 
+    let client = reqwest::Client::new();
+    let (paths, truncated) = load_tree(&client, &token, &owner, &repo, &branch).await;
+
     let files = GitHubFiles {
-        client: reqwest::Client::new(),
+        client,
         token,
         owner,
         repo,
         branch,
+        paths,
+        truncated,
         cache: Mutex::new(HashMap::new()),
     };
 
