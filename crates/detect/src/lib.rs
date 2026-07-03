@@ -67,6 +67,10 @@ pub struct Signal {
 /// The fully-resolved, form-ready detection result.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Detection {
+    /// The branch the configuration was detected on (the repo's default branch unless the
+    /// caller pinned one). Set by the endpoint, not the file-level algorithm.
+    #[serde(default)]
+    pub branch: Option<String>,
     pub runtime: Option<Runtime>,
     pub transport: Option<Transport>,
     /// "" means the repo root; otherwise the subdirectory to build in.

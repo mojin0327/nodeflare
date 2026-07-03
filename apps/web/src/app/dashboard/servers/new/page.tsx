@@ -121,6 +121,7 @@ export default function NewServerPage() {
   const applyDetection = useCallback((d: RepoDetection) => {
     setFormData((prev) => ({
       ...prev,
+      github_branch: d.branch || prev.github_branch,
       runtime: d.runtime ?? prev.runtime,
       transport: d.transport ?? prev.transport,
       root_directory: d.root_directory ?? prev.root_directory,
@@ -151,11 +152,12 @@ export default function NewServerPage() {
   const inspectMutate = inspectMutation.mutate;
 
   const runDetect = useCallback(
-    (repo: string, branch: string, subdir?: string) => {
+    (repo: string, branch: string | undefined, subdir?: string) => {
       if (!repo) return;
       inspectMutate({
         github_repo: repo,
-        github_branch: branch || 'main',
+        // Omit the branch when unknown so the backend resolves the repo's default branch.
+        github_branch: branch || undefined,
         account_id: selectedAccountId || undefined,
         root_directory: subdir,
       });
@@ -222,13 +224,15 @@ export default function NewServerPage() {
         github_repo: `${parsed.owner}/${parsed.repo}`,
         name: leaf,
         slug: slug,
-        github_branch: parsed.branch || 'main',
+        // Only pin the branch when the URL specified one; otherwise detection fills the
+        // repo's actual default branch.
+        github_branch: parsed.branch || '',
         root_directory: parsed.subdir || '',
       }));
       // Debounce auto-detection while the user is still typing/pasting the URL.
       if (detectTimer.current) clearTimeout(detectTimer.current);
       detectTimer.current = setTimeout(() => {
-        runDetect(`${parsed.owner}/${parsed.repo}`, parsed.branch || 'main', parsed.subdir);
+        runDetect(`${parsed.owner}/${parsed.repo}`, parsed.branch, parsed.subdir);
       }, 350);
     } else {
       setPublicRepoError('Invalid format. Use owner/repo or full GitHub URL');
@@ -573,21 +577,6 @@ export default function NewServerPage() {
               />
             </div>
 
-            <div>
-              <Label htmlFor="github_branch" className="text-gray-700">{t('create.branch')}</Label>
-              <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                <GitBranch className="w-4 h-4 text-gray-400" />
-                <input
-                  id="github_branch"
-                  type="text"
-                  placeholder={t('create.branchPlaceholder')}
-                  value={formData.github_branch}
-                  onChange={(e) => setFormData(prev => ({ ...prev, github_branch: e.target.value }))}
-                  className="flex-1 bg-transparent text-sm focus:outline-none"
-                />
-              </div>
-            </div>
-
             {/* Detected deploy settings — folded away like Vercel; click to edit. */}
             <button
               type="button"
@@ -602,6 +591,101 @@ export default function NewServerPage() {
             <div className="space-y-4">
                 {advancedOpen && (
                 <div className="space-y-4">
+                <div>
+                  <Label htmlFor="github_branch" className="text-gray-700">{t('create.branch')}</Label>
+                  <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
+                    <GitBranch className="w-4 h-4 text-gray-400" />
+                    <input
+                      id="github_branch"
+                      type="text"
+                      placeholder={t('create.branchPlaceholder')}
+                      value={formData.github_branch}
+                      onChange={(e) => setFormData(prev => ({ ...prev, github_branch: e.target.value }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-gray-700">{t('create.runtime')}</Label>
+                  <div className="grid grid-cols-5 gap-3 mt-2">
+                    {runtimes.map((runtime) => {
+                      const isSelected = formData.runtime === runtime.value;
+                      return (
+                        <button
+                          key={runtime.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, runtime: runtime.value as Runtime }))}
+                          className={`p-3 rounded-lg text-center transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-white border border-gray-100 shadow-lg scale-110 z-10'
+                              : 'bg-white border border-gray-50 opacity-40 hover:opacity-70'
+                          }`}
+                        >
+                          <div className={`${isSelected ? 'w-12 h-12' : 'w-10 h-10'} mx-auto mb-2 rounded-lg ${runtime.color} flex items-center justify-center text-white transition-all duration-200`}>
+                            {runtime.icon}
+                          </div>
+                          <span className={`text-xs font-medium ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{runtime.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-gray-700">{t('create.transport')}</Label>
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'sse' }))}
+                      className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
+                        formData.transport === 'sse'
+                          ? 'bg-violet-50 border border-violet-200 shadow-sm'
+                          : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center flex-shrink-0">
+                        <ArrowRight className={`w-6 h-6 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-400'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="block font-semibold text-sm text-[#323232]">Streamable HTTP</span>
+                        <span className={`block text-xs mt-0.5 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-500'}`}>
+                          {t('create.transportSseDesc')}
+                        </span>
+                      </div>
+                      {formData.transport === 'sse' && (
+                        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                        </div>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'stdio', port: undefined }))}
+                      className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
+                        formData.transport === 'stdio'
+                          ? 'bg-violet-50 border border-violet-200 shadow-sm'
+                          : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center flex-shrink-0">
+                        <MonitorPlay className={`w-6 h-6 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-400'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="block font-semibold text-sm text-[#323232]">STDIO</span>
+                        <span className={`block text-xs mt-0.5 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-500'}`}>
+                          {t('create.transportStdioDesc')}
+                        </span>
+                      </div>
+                      {formData.transport === 'stdio' && (
+                        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <Label htmlFor="root_directory" className="text-gray-700">{t('create.rootDirectory')}</Label>
                   <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.rootDirectoryHelp')}</p>
@@ -790,94 +874,6 @@ export default function NewServerPage() {
           </div>
         </section>
 
-        {/* Transport Selection */}
-        <section>
-          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.transport')}</h2>
-          <p className="text-sm text-gray-500 mb-4">{t('create.transportHelp')}</p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setFormData(prev => ({ ...prev, transport: 'sse' }))}
-              className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
-                formData.transport === 'sse'
-                  ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                  : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <div className="flex items-center justify-center flex-shrink-0">
-                <ArrowRight className={`w-6 h-6 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-400'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="block font-semibold text-sm text-[#323232]">
-                  Streamable HTTP
-                </span>
-                <span className={`block text-xs mt-0.5 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-500'}`}>
-                  {t('create.transportSseDesc')}
-                </span>
-              </div>
-              {formData.transport === 'sse' && (
-                <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                </div>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormData(prev => ({ ...prev, transport: 'stdio', port: undefined }))}
-              className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
-                formData.transport === 'stdio'
-                  ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                  : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <div className="flex items-center justify-center flex-shrink-0">
-                <MonitorPlay className={`w-6 h-6 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-400'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="block font-semibold text-sm text-[#323232]">
-                  STDIO
-                </span>
-                <span className={`block text-xs mt-0.5 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-500'}`}>
-                  {t('create.transportStdioDesc')}
-                </span>
-              </div>
-              {formData.transport === 'stdio' && (
-                <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                </div>
-              )}
-            </button>
-          </div>
-        </section>
-
-        {/* Runtime Selection */}
-        <section>
-          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.runtime')}</h2>
-
-          <div className="grid grid-cols-5 gap-3">
-            {runtimes.map((runtime) => {
-              const isSelected = formData.runtime === runtime.value;
-              return (
-                <button
-                  key={runtime.value}
-                  type="button"
-                  onClick={() => setFormData(prev => ({ ...prev, runtime: runtime.value as Runtime }))}
-                  className={`p-3 rounded-lg text-center transition-all duration-200 ${
-                    isSelected
-                      ? 'bg-white border border-gray-100 shadow-lg scale-110 z-10'
-                      : 'bg-white border border-gray-50 opacity-40 hover:opacity-70'
-                  }`}
-                >
-                  <div className={`${isSelected ? 'w-12 h-12' : 'w-10 h-10'} mx-auto mb-2 rounded-lg ${runtime.color} flex items-center justify-center text-white transition-all duration-200`}>
-                    {runtime.icon}
-                  </div>
-                  <span className={`text-xs font-medium ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{runtime.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
 
         {/* Visibility Selection */}
         <section>

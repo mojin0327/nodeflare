@@ -53,6 +53,7 @@ export interface DetectedEnvVar {
 
 /** Auto-detected deploy configuration for a repo (see the `/servers/inspect` endpoint). */
 export interface RepoDetection {
+  branch?: string;
   runtime?: 'node' | 'python' | 'go' | 'rust' | 'docker';
   transport?: 'stdio' | 'sse';
   root_directory?: string;

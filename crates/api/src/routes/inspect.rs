@@ -159,6 +159,32 @@ async fn load_tree(
     }
 }
 
+#[derive(Deserialize)]
+struct RepoMeta {
+    default_branch: Option<String>,
+}
+
+/// Resolve a repo's default branch (e.g. `main`, `master`, `develop`). Best-effort.
+async fn fetch_default_branch(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Option<String> {
+    let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<RepoMeta>().await.ok()?.default_branch
+}
+
 pub async fn inspect(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -181,14 +207,27 @@ pub async fn inspect(
         }
     };
 
-    let branch = body.github_branch.clone().unwrap_or_else(|| "main".to_string());
+    // The branch is auto-detected (repo default) unless the caller pinned one, e.g. from a
+    // `/tree/<branch>` URL. `None` here means "resolve the default branch below".
+    let requested_branch = body
+        .github_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let subdir = body
         .root_directory
         .as_deref()
         .map(|s| s.trim().trim_matches('/'))
         .filter(|s| !s.is_empty());
 
-    let cache_key = format!("inspect:v1:{}/{}@{}#{}", owner, repo, branch, subdir.unwrap_or(""));
+    let cache_key = format!(
+        "inspect:v1:{}/{}@{}#{}",
+        owner,
+        repo,
+        requested_branch.as_deref().unwrap_or(""),
+        subdir.unwrap_or("")
+    );
 
     // (3) Redis result cache — a hit skips GitHub, the DB and token decryption entirely.
     if let Some(cached) = state.redis.get::<Option<String>, _>(&cache_key).await.ok().flatten() {
@@ -224,6 +263,15 @@ pub async fn inspect(
     // (2) Shared pooled client — no per-request TLS handshake; HTTP/2 multiplexing.
     let client = state.http.clone();
 
+    // Auto-detect the branch: use the repo's actual default branch (which may be `master`,
+    // `develop`, …) unless the caller pinned one — the user shouldn't have to type it.
+    let branch = match requested_branch {
+        Some(b) => b,
+        None => fetch_default_branch(&client, &token, &owner, &repo)
+            .await
+            .unwrap_or_else(|| "main".to_string()),
+    };
+
     let t_tree = Instant::now();
     let (paths, truncated) = load_tree(&client, &token, &owner, &repo, &branch).await;
     let tree_ms = t_tree.elapsed();
@@ -254,7 +302,8 @@ pub async fn inspect(
     let prefetch_ms = t_pf.elapsed();
 
     let t_det = Instant::now();
-    let detection = mcp_detect::inspect(&files, subdir).await;
+    let mut detection = mcp_detect::inspect(&files, subdir).await;
+    detection.branch = Some(branch.clone());
     let detect_ms = t_det.elapsed();
 
     // Cache the result (best-effort).
