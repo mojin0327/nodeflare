@@ -256,13 +256,17 @@ export default function NewServerPage() {
       return api.post<McpServer>(`/workspaces/${workspaceId}/servers`, data);
     },
     onSuccess: (server) => {
+      // Navigate away IMMEDIATELY so the user isn't left sitting on the form for a few
+      // seconds. The cache invalidations below trigger refetches of the (still-mounted)
+      // list queries; running them first delays the transition, so push first and let the
+      // list caches refresh in the background — they re-fetch before the list is shown.
+      router.replace(`/dashboard/servers/${server.id}`);
       // List views are keyed ['servers-list'|'servers-minimal'|'servers-basic', wsId]; a
       // bare ['servers'] key doesn't match them. Invalidate each list prefix (react-query
       // prefix-matches, so the workspace-scoped variants refresh too).
       queryClient.invalidateQueries({ queryKey: ['servers-list'] });
       queryClient.invalidateQueries({ queryKey: ['servers-minimal'] });
       queryClient.invalidateQueries({ queryKey: ['servers-basic'] });
-      router.push(`/dashboard/servers/${server.id}`);
     },
   });
 
