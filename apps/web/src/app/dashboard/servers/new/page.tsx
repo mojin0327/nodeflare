@@ -596,7 +596,7 @@ export default function NewServerPage() {
             >
               <ChevronDown className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
               {t('create.advancedSettings')}
-            </div>
+            </button>
 
 
             <div className="space-y-4">
