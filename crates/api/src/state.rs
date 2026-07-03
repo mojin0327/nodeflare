@@ -26,6 +26,10 @@ pub struct AppState {
     pub email: Option<EmailService>,
     pub fly_runtime: Option<FlyioRuntime>,
     pub cache: ApiCache,
+    /// Shared, connection-pooled HTTP client (keep-alive + HTTP/2). Reused for outbound
+    /// calls like the repo-inspect GitHub requests so each request avoids a cold TLS
+    /// handshake and can multiplex parallel fetches over one connection.
+    pub http: reqwest::Client,
 }
 
 impl AppState {
@@ -121,6 +125,16 @@ impl AppState {
             }
         };
 
+        // Shared outbound HTTP client: pooled keep-alive connections so repeated/parallel
+        // GitHub calls (repo inspect) skip the TLS handshake and reuse one HTTP/2 conn.
+        let http = reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .pool_max_idle_per_host(16)
+            .timeout(std::time::Duration::from_secs(15))
+            .user_agent("NodeFlare/1.0")
+            .build()
+            .unwrap_or_default();
+
         Self {
             config,
             db,
@@ -135,6 +149,7 @@ impl AppState {
             email,
             fly_runtime,
             cache,
+            http,
         }
     }
 }

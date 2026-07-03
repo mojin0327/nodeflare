@@ -14,10 +14,10 @@ pub mod scan;
 
 use async_trait::async_trait;
 use parse::NodePm;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Runtime NodeFlare can build. Serializes to the form's lowercase spelling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Runtime {
     Node,
@@ -41,7 +41,7 @@ impl Runtime {
 
 /// Transport, in the form's vocabulary: `Sse` is the HTTP-exposed side (Streamable HTTP
 /// or legacy SSE), `Stdio` is the stdin/stdout adapter side.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
     Stdio,
@@ -49,7 +49,7 @@ pub enum Transport {
 }
 
 /// A required/optional environment variable, with whatever metadata the source offered.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvVar {
     pub key: String,
     pub description: Option<String>,
@@ -58,14 +58,14 @@ pub struct EnvVar {
 }
 
 /// One provenance record: which field a value came from, and the signal that produced it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
-    pub field: &'static str,
+    pub field: String,
     pub source: String,
 }
 
 /// The fully-resolved, form-ready detection result.
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Detection {
     pub runtime: Option<Runtime>,
     pub transport: Option<Transport>,
@@ -84,7 +84,7 @@ pub struct Detection {
 
 impl Detection {
     fn signal(&mut self, field: &'static str, source: impl Into<String>) {
-        self.signals.push(Signal { field, source: source.into() });
+        self.signals.push(Signal { field: field.to_string(), source: source.into() });
     }
 }
 
@@ -164,6 +164,46 @@ async fn read_sources<F: RepoFiles + ?Sized>(files: &F, base: &str, runtime: Run
             out.push('\n');
         }
     }
+    out
+}
+
+/// All repo-relative paths whose *contents* [`inspect`] may read, for the given target
+/// subdir. The `/inspect` endpoint intersects this with the repo's git tree and
+/// pre-fetches the survivors in parallel, priming the file cache so `inspect()` itself
+/// performs no sequential network I/O. Keep in sync with the `read()` calls in `inspect`.
+/// (Existence-only probes don't need prefetching — the tree answers those for free.)
+pub fn candidate_paths(subdir: Option<&str>) -> Vec<String> {
+    let base = subdir.unwrap_or("").trim_matches('/').to_string();
+    let mut out: Vec<String> = Vec::new();
+
+    // Manifests, checked in the target dir and the repo root.
+    for dir in dedup_dirs(&[base.as_str(), ""]) {
+        for name in ["server.json", "mcp.json", "smithery.yaml", "smithery.yml"] {
+            out.push(join(&dir, name));
+        }
+    }
+    // Repo-root workspace files (read regardless of target dir).
+    out.push("package.json".to_string());
+    out.push("pnpm-workspace.yaml".to_string());
+    out.push("pnpm-workspace.yml".to_string());
+    // Target-dir manifests/config read for runtime, entry and build.
+    for name in ["package.json", "pyproject.toml", "Cargo.toml", "tsconfig.json"] {
+        out.push(join(&base, name));
+    }
+    // Source-scan candidates (Node + Python supersets; only tree-present paths are fetched).
+    for name in [
+        "src/index.ts", "src/server.ts", "src/main.ts", "index.ts", "server.ts",
+        "src/index.js", "index.js", "server.js", "build/index.js", "dist/index.js",
+        "server.py", "main.py", "app.py", "__main__.py", "src/server.py", "src/main.py",
+    ] {
+        out.push(join(&base, name));
+    }
+    // Env declarations.
+    out.push(join(&base, ".env.example"));
+    out.push(".env.example".to_string());
+
+    out.sort();
+    out.dedup();
     out
 }
 

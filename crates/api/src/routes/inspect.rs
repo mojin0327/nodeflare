@@ -3,19 +3,26 @@
 //! algorithm over the GitHub Contents API — the same algorithm the builder runs over the
 //! cloned repo — so what the form shows is what will actually build.
 //!
-//! Speed: the whole file list is fetched ONCE via the recursive git-tree API, so
-//! `exists()` is an in-memory lookup (no network) and `read()` skips files that aren't in
-//! the tree. That collapses the detector's dozens of existence probes into a single tree
-//! request plus a handful of content fetches — the reason this feels instant.
+//! Speed (why this feels instant):
+//!   1. The whole file list is fetched ONCE via the recursive git-tree API, so `exists()`
+//!      is an in-memory lookup and absent files cost zero network.
+//!   2. Every file the detector will read is pre-fetched IN PARALLEL and cached, so the
+//!      detection pass itself does no sequential network I/O.
+//!   3. Results are cached in Redis per (repo, branch, subdir) for a short TTL, so the
+//!      debounced/repeat calls the form makes return with no GitHub round-trips at all.
+//! The shared, connection-pooled HTTP client (AppState.http) avoids a cold TLS handshake
+//! per request and multiplexes the parallel fetches over one HTTP/2 connection.
 //!
 //! Auth uses the caller's linked-account OAuth token (as `list_repositories` does), so it
 //! reads public repos and the user's own private repos without a GitHub App installation.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use axum::{extract::State, Json};
+use fred::prelude::*;
 use mcp_db::LinkedGitHubAccountRepository;
 use mcp_detect::{Detection, RepoFiles};
 use serde::Deserialize;
@@ -25,6 +32,10 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+
+/// How long a detection result is cached. Short, since a repo can change; long enough to
+/// collapse the burst of calls the form makes while the user edits the URL/subdir.
+const INSPECT_CACHE_TTL_SECS: i64 = 120;
 
 #[derive(Deserialize)]
 pub struct InspectRequest {
@@ -52,10 +63,10 @@ struct TreeEntry {
     path: String,
 }
 
-/// [`RepoFiles`] backed by the GitHub API. The recursive git tree (all paths) is
-/// pre-loaded so `exists` never touches the network; content is fetched lazily and
-/// memoized per path. If the tree came back truncated (very large repos), `exists`/`read`
-/// fall back to a live fetch so correctness is preserved.
+/// [`RepoFiles`] backed by the GitHub API over a shared pooled client. The recursive git
+/// tree (all paths) is pre-loaded so `exists` never touches the network; content is
+/// fetched (and pre-fetched in parallel) then memoized per path. If the tree came back
+/// truncated (very large repos), `exists`/`read` fall back to a live fetch.
 struct GitHubFiles {
     client: reqwest::Client,
     token: String,
@@ -82,7 +93,6 @@ impl GitHubFiles {
             .header("Authorization", format!("Bearer {}", self.token))
             // `raw` returns file bytes directly (no base64 wrapper).
             .header("Accept", "application/vnd.github.raw+json")
-            .header("User-Agent", "NodeFlare/1.0")
             .send()
             .await
         {
@@ -92,12 +102,16 @@ impl GitHubFiles {
         self.cache.lock().await.insert(path.to_string(), result.clone());
         result
     }
+
+    /// Fetch every path concurrently, priming the cache so the detection pass hits memory.
+    async fn prefetch(&self, paths: &[String]) {
+        futures::future::join_all(paths.iter().map(|p| self.fetch(p))).await;
+    }
 }
 
 #[async_trait]
 impl RepoFiles for GitHubFiles {
     async fn read(&self, path: &str) -> Option<String> {
-        // Skip the network entirely for files the tree says don't exist.
         if !self.truncated && !self.paths.contains(path) {
             return None;
         }
@@ -108,7 +122,6 @@ impl RepoFiles for GitHubFiles {
         if self.paths.contains(path) {
             return true;
         }
-        // Truncated tree: the path might exist but be missing from the partial list.
         self.truncated && self.fetch(path).await.is_some()
     }
 
@@ -118,7 +131,7 @@ impl RepoFiles for GitHubFiles {
 }
 
 /// Fetch the repo's recursive git tree once. Returns (all paths, truncated). On any
-/// failure, returns an empty set marked truncated so the detector falls back to live
+/// failure returns an empty set marked truncated so the detector falls back to live
 /// probes (slower, but still correct).
 async fn load_tree(
     client: &reqwest::Client,
@@ -135,15 +148,11 @@ async fn load_tree(
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "NodeFlare/1.0")
         .send()
         .await;
     match resp {
         Ok(r) if r.status().is_success() => match r.json::<TreeResponse>().await {
-            Ok(tree) => (
-                tree.tree.into_iter().map(|e| e.path).collect(),
-                tree.truncated,
-            ),
+            Ok(tree) => (tree.tree.into_iter().map(|e| e.path).collect(), tree.truncated),
             Err(_) => (HashSet::new(), true),
         },
         _ => (HashSet::new(), true),
@@ -155,6 +164,8 @@ pub async fn inspect(
     auth_user: AuthUser,
     Json(body): Json<InspectRequest>,
 ) -> Result<Json<Detection>, AppError> {
+    let started = Instant::now();
+
     let (owner, repo) = {
         let mut parts = body.github_repo.split('/');
         match (parts.next(), parts.next(), parts.next()) {
@@ -169,6 +180,23 @@ pub async fn inspect(
             }
         }
     };
+
+    let branch = body.github_branch.clone().unwrap_or_else(|| "main".to_string());
+    let subdir = body
+        .root_directory
+        .as_deref()
+        .map(|s| s.trim().trim_matches('/'))
+        .filter(|s| !s.is_empty());
+
+    let cache_key = format!("inspect:v1:{}/{}@{}#{}", owner, repo, branch, subdir.unwrap_or(""));
+
+    // (3) Redis result cache — a hit skips GitHub, the DB and token decryption entirely.
+    if let Some(cached) = state.redis.get::<Option<String>, _>(&cache_key).await.ok().flatten() {
+        if let Ok(det) = serde_json::from_str::<Detection>(&cached) {
+            tracing::info!("inspect cache HIT {} in {:?}", cache_key, started.elapsed());
+            return Ok(Json(det));
+        }
+    }
 
     // Resolve the caller's GitHub OAuth token (same path as listing repositories).
     let account = match body.account_id {
@@ -193,27 +221,54 @@ pub async fn inspect(
             AppError::internal("GitHub token decryption failed")
         })?;
 
-    let branch = body.github_branch.clone().unwrap_or_else(|| "main".to_string());
-    let subdir = body
-        .root_directory
-        .as_deref()
-        .map(|s| s.trim().trim_matches('/'))
-        .filter(|s| !s.is_empty());
+    // (2) Shared pooled client — no per-request TLS handshake; HTTP/2 multiplexing.
+    let client = state.http.clone();
 
-    let client = reqwest::Client::new();
+    let t_tree = Instant::now();
     let (paths, truncated) = load_tree(&client, &token, &owner, &repo, &branch).await;
+    let tree_ms = t_tree.elapsed();
+
+    // (1) Pre-fetch, in parallel, every file the detector will read that actually exists.
+    let wanted: Vec<String> = if truncated {
+        Vec::new()
+    } else {
+        mcp_detect::candidate_paths(subdir)
+            .into_iter()
+            .filter(|p| paths.contains(p))
+            .collect()
+    };
 
     let files = GitHubFiles {
         client,
         token,
-        owner,
-        repo,
-        branch,
+        owner: owner.clone(),
+        repo: repo.clone(),
+        branch: branch.clone(),
         paths,
         truncated,
         cache: Mutex::new(HashMap::new()),
     };
 
+    let t_pf = Instant::now();
+    files.prefetch(&wanted).await;
+    let prefetch_ms = t_pf.elapsed();
+
+    let t_det = Instant::now();
     let detection = mcp_detect::inspect(&files, subdir).await;
+    let detect_ms = t_det.elapsed();
+
+    // Cache the result (best-effort).
+    if let Ok(json) = serde_json::to_string(&detection) {
+        let _: Result<(), _> = state
+            .redis
+            .set(&cache_key, json, Some(Expiration::EX(INSPECT_CACHE_TTL_SECS)), None, false)
+            .await;
+    }
+
+    tracing::info!(
+        "inspect MISS {} tree={:?} prefetch={:?}({} files) detect={:?} total={:?} truncated={}",
+        cache_key, tree_ms, prefetch_ms, wanted.len(), detect_ms, started.elapsed(), truncated
+    );
+
     Ok(Json(detection))
 }

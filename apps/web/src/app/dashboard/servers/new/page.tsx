@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound } from 'lucide-react';
+import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound, Loader2, ChevronDown } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getLinkedAccounts, getRepos, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
 import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo } from '@/types';
@@ -115,6 +115,8 @@ export default function NewServerPage() {
   // Auto-detect deploy config from the repo (Vercel-style): silently pre-fill the fields
   // below with the same values the builder will use. Every field stays editable.
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Detected deploy settings are folded away (Vercel-style); env vars stay visible.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const applyDetection = useCallback((d: RepoDetection) => {
     setFormData((prev) => ({
@@ -521,12 +523,6 @@ export default function NewServerPage() {
                   {publicRepoError}
                 </p>
               )}
-              {formData.github_repo && !publicRepoError && (
-                <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 border border-green-200 text-green-700">
-                  <Check className="w-4 h-4 flex-shrink-0" />
-                  <span className="text-sm font-medium">{formData.github_repo}</span>
-                </div>
-              )}
               <p className="text-xs text-gray-500 flex items-start gap-2">
                 <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 {t('create.publicUrlHelp')}
@@ -538,6 +534,13 @@ export default function NewServerPage() {
         {/* Server Details */}
         <section>
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.configuration')}</h2>
+
+          {inspectMutation.isPending && (
+            <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-violet-50 border border-violet-100 text-violet-700">
+              <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
+              <span className="text-sm font-medium">{t('create.detecting')}</span>
+            </div>
+          )}
 
           <div className="space-y-4">
             <div>
@@ -581,13 +584,20 @@ export default function NewServerPage() {
               </div>
             </div>
 
-            {/* Advanced Settings (always visible) */}
-            <div className="pt-2 text-sm font-medium text-gray-500">
+            {/* Detected deploy settings — folded away like Vercel; click to edit. */}
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex items-center gap-1.5 pt-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
               {t('create.advancedSettings')}
             </div>
 
 
             <div className="space-y-4">
+                {advancedOpen && (
+                <div className="space-y-4">
                 <div>
                   <Label htmlFor="root_directory" className="text-gray-700">{t('create.rootDirectory')}</Label>
                   <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.rootDirectoryHelp')}</p>
@@ -681,6 +691,8 @@ export default function NewServerPage() {
                     />
                   </div>
                 </div>
+                </div>
+                )}
 
                 {/* Machine memory */}
                 <MemorySelect
