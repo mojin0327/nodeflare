@@ -211,6 +211,35 @@ pub fn candidate_paths(subdir: Option<&str>) -> Vec<String> {
     out
 }
 
+/// Existence-only paths that [`inspect`] probes but never reads the *content* of.
+/// Together with [`candidate_paths`] this is every path the algorithm touches — the
+/// `/inspect` endpoint uses both to answer `exists()`/`read()` from a single batched
+/// GraphQL request (no git tree). Keep in sync with the `exists()` calls in `inspect`,
+/// `detect_node_pm` and `detect_runtime`.
+pub fn probe_paths(subdir: Option<&str>) -> Vec<String> {
+    let base = subdir.unwrap_or("").trim_matches('/').to_string();
+    let mut out: Vec<String> = Vec::new();
+    // Package manager + workspace/lockfiles are checked at the repo root and target dir.
+    for dir in dedup_dirs(&[base.as_str(), ""]) {
+        for name in [
+            "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "pnpm-workspace.yml",
+            "bun.lockb", "bun.lock", "yarn.lock",
+        ] {
+            out.push(join(&dir, name));
+        }
+    }
+    // Runtime / build / entry existence, checked in the target dir.
+    for name in [
+        "pyproject.toml", "requirements.txt", "setup.py", "uv.lock", "go.mod", "Cargo.toml",
+        "Dockerfile", "tsconfig.json", "server.py", "main.py", "app.py", "__main__.py",
+    ] {
+        out.push(join(&base, name));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Detect deploy configuration for `subdir` (or the repo root when None).
 pub async fn inspect<F: RepoFiles + ?Sized>(files: &F, subdir: Option<&str>) -> Detection {
     let member = subdir.unwrap_or("").trim_matches('/').to_string();

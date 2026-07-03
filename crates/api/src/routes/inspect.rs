@@ -1,20 +1,18 @@
 //! `POST /servers/inspect` — auto-detect deploy configuration from a GitHub repo so the
 //! server-create form can be pre-filled (Vercel-style). Runs the shared `mcp_detect`
-//! algorithm over the GitHub Contents API — the same algorithm the builder runs over the
-//! cloned repo — so what the form shows is what will actually build.
+//! algorithm over the GitHub API — the same algorithm the builder runs over the cloned
+//! repo — so what the form shows is what will actually build.
 //!
-//! Speed (why this feels instant):
-//!   1. The whole file list is fetched ONCE via the recursive git-tree API, so `exists()`
-//!      is an in-memory lookup and absent files cost zero network.
-//!   2. Every file the detector will read is pre-fetched IN PARALLEL and cached, so the
-//!      detection pass itself does no sequential network I/O.
-//!   3. Results are cached in Redis per (repo, branch, subdir) for a short TTL, so the
-//!      debounced/repeat calls the form makes return with no GitHub round-trips at all.
-//! The shared, connection-pooled HTTP client (AppState.http) avoids a cold TLS handshake
-//! per request and multiplexes the parallel fetches over one HTTP/2 connection.
+//! Speed (how this reaches ~1 round-trip, Vercel-style):
+//!   - PRIMARY: one GraphQL request returns the default branch name, the contents of every
+//!     candidate file, and the existence of every probe path — the entire detector input in
+//!     a single round-trip, with no over-fetching (missing paths come back null).
+//!   - FALLBACK (if GraphQL errors): the recursive git tree (one call, makes `exists()`
+//!     free) + a parallel batch of content fetches.
+//!   - Results are cached in Redis per (repo, branch, subdir) for a short TTL, and a shared
+//!     pooled HTTP/2 client avoids per-request TLS handshakes.
 //!
-//! Auth uses the caller's linked-account OAuth token (as `list_repositories` does), so it
-//! reads public repos and the user's own private repos without a GitHub App installation.
+//! Auth uses the caller's linked-account OAuth token (as `list_repositories` does).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,6 +24,7 @@ use fred::prelude::*;
 use mcp_db::LinkedGitHubAccountRepository;
 use mcp_detect::{Detection, RepoFiles};
 use serde::Deserialize;
+use serde_json::json;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -33,8 +32,6 @@ use crate::error::AppError;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
 
-/// How long a detection result is cached. Short, since a repo can change; long enough to
-/// collapse the burst of calls the form makes while the user edits the URL/subdir.
 const INSPECT_CACHE_TTL_SECS: i64 = 120;
 
 #[derive(Deserialize)]
@@ -42,13 +39,124 @@ pub struct InspectRequest {
     /// `owner/repo`.
     pub github_repo: String,
     pub github_branch: Option<String>,
-    /// Linked GitHub account to authenticate as; defaults to the caller's primary.
     #[serde(default)]
     pub account_id: Option<Uuid>,
-    /// Optional subdirectory the server lives in (monorepo member).
     #[serde(default)]
     pub root_directory: Option<String>,
 }
+
+// ---------------------------------------------------------------------------------------
+// PRIMARY path: a single GraphQL request for everything.
+// ---------------------------------------------------------------------------------------
+
+/// Files already resolved (contents + existence) from the batched GraphQL response, so the
+/// detector runs entirely in memory with zero further network I/O.
+struct BatchFiles {
+    contents: HashMap<String, String>,
+    present: HashSet<String>,
+}
+
+#[async_trait]
+impl RepoFiles for BatchFiles {
+    async fn read(&self, path: &str) -> Option<String> {
+        self.contents.get(path).cloned()
+    }
+    async fn exists(&self, path: &str) -> bool {
+        self.present.contains(path)
+    }
+    async fn list_dir(&self, _path: &str) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+struct GqlResult {
+    files: BatchFiles,
+    default_branch: Option<String>,
+}
+
+/// Fetch the default branch name, the content of every `read_paths` file, and the existence
+/// of every `probe_paths` file in ONE GraphQL request. `ref_prefix` is `"HEAD:"` (default
+/// branch) or `"<branch>:"`. Returns None on any transport/GraphQL error so the caller can
+/// fall back to REST.
+async fn graphql_batch(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    ref_prefix: &str,
+    read_paths: &[String],
+    probe_paths: &[String],
+) -> Option<GqlResult> {
+    let mut fields = String::from("defaultBranchRef { name }\n");
+    for (i, p) in read_paths.iter().enumerate() {
+        fields.push_str(&format!(
+            "r{}: object(expression: {}) {{ ... on Blob {{ text }} }}\n",
+            i,
+            json!(format!("{}{}", ref_prefix, p))
+        ));
+    }
+    for (i, p) in probe_paths.iter().enumerate() {
+        fields.push_str(&format!(
+            "e{}: object(expression: {}) {{ __typename }}\n",
+            i,
+            json!(format!("{}{}", ref_prefix, p))
+        ));
+    }
+    let query = format!(
+        "query {{ repository(owner: {}, name: {}) {{ {} }} }}",
+        json!(owner),
+        json!(repo),
+        fields
+    );
+
+    let resp = client
+        .post("https://api.github.com/graphql")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", "NodeFlare/1.0")
+        .json(&json!({ "query": query }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    let repo_obj = body.get("data")?.get("repository")?;
+    if repo_obj.is_null() {
+        return None;
+    }
+
+    let mut contents = HashMap::new();
+    let mut present = HashSet::new();
+    for (i, p) in read_paths.iter().enumerate() {
+        if let Some(obj) = repo_obj.get(format!("r{}", i).as_str()) {
+            if !obj.is_null() {
+                present.insert(p.clone());
+                if let Some(text) = obj.get("text").and_then(|t| t.as_str()) {
+                    contents.insert(p.clone(), text.to_string());
+                }
+            }
+        }
+    }
+    for (i, p) in probe_paths.iter().enumerate() {
+        if let Some(obj) = repo_obj.get(format!("e{}", i).as_str()) {
+            if !obj.is_null() {
+                present.insert(p.clone());
+            }
+        }
+    }
+    let default_branch = repo_obj
+        .get("defaultBranchRef")
+        .and_then(|r| r.get("name"))
+        .and_then(|n| n.as_str())
+        .map(str::to_string);
+
+    Some(GqlResult { files: BatchFiles { contents, present }, default_branch })
+}
+
+// ---------------------------------------------------------------------------------------
+// FALLBACK path: recursive git tree + parallel content prefetch over the Contents API.
+// ---------------------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct TreeResponse {
@@ -63,10 +171,11 @@ struct TreeEntry {
     path: String,
 }
 
-/// [`RepoFiles`] backed by the GitHub API over a shared pooled client. The recursive git
-/// tree (all paths) is pre-loaded so `exists` never touches the network; content is
-/// fetched (and pre-fetched in parallel) then memoized per path. If the tree came back
-/// truncated (very large repos), `exists`/`read` fall back to a live fetch.
+#[derive(Deserialize)]
+struct RepoMeta {
+    default_branch: Option<String>,
+}
+
 struct GitHubFiles {
     client: reqwest::Client,
     token: String,
@@ -91,7 +200,6 @@ impl GitHubFiles {
             .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.token))
-            // `raw` returns file bytes directly (no base64 wrapper).
             .header("Accept", "application/vnd.github.raw+json")
             .send()
             .await
@@ -103,7 +211,6 @@ impl GitHubFiles {
         result
     }
 
-    /// Fetch every path concurrently, priming the cache so the detection pass hits memory.
     async fn prefetch(&self, paths: &[String]) {
         futures::future::join_all(paths.iter().map(|p| self.fetch(p))).await;
     }
@@ -117,22 +224,17 @@ impl RepoFiles for GitHubFiles {
         }
         self.fetch(path).await
     }
-
     async fn exists(&self, path: &str) -> bool {
         if self.paths.contains(path) {
             return true;
         }
         self.truncated && self.fetch(path).await.is_some()
     }
-
     async fn list_dir(&self, _path: &str) -> Vec<String> {
         Vec::new()
     }
 }
 
-/// Fetch the repo's recursive git tree once. Returns (all paths, truncated). On any
-/// failure returns an empty set marked truncated so the detector falls back to live
-/// probes (slower, but still correct).
 async fn load_tree(
     client: &reqwest::Client,
     token: &str,
@@ -159,12 +261,6 @@ async fn load_tree(
     }
 }
 
-#[derive(Deserialize)]
-struct RepoMeta {
-    default_branch: Option<String>,
-}
-
-/// Resolve a repo's default branch (e.g. `main`, `master`, `develop`). Best-effort.
 async fn fetch_default_branch(
     client: &reqwest::Client,
     token: &str,
@@ -184,6 +280,60 @@ async fn fetch_default_branch(
     }
     resp.json::<RepoMeta>().await.ok()?.default_branch
 }
+
+/// REST fallback: resolve the branch (default via HEAD tree + metadata in parallel), then
+/// run the detector over a tree-backed, parallel-prefetched file view.
+async fn rest_detect(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    requested_branch: Option<String>,
+    subdir: Option<&str>,
+) -> Detection {
+    let (form_branch, content_ref, paths, truncated) = match requested_branch {
+        Some(b) => {
+            let (paths, truncated) = load_tree(client, token, owner, repo, &b).await;
+            (b.clone(), b, paths, truncated)
+        }
+        None => {
+            let (name_opt, (paths, truncated)) = tokio::join!(
+                fetch_default_branch(client, token, owner, repo),
+                load_tree(client, token, owner, repo, "HEAD"),
+            );
+            let content_ref = name_opt.clone().unwrap_or_else(|| "HEAD".to_string());
+            let form_branch = name_opt.unwrap_or_else(|| "main".to_string());
+            (form_branch, content_ref, paths, truncated)
+        }
+    };
+
+    let wanted: Vec<String> = if truncated {
+        Vec::new()
+    } else {
+        mcp_detect::candidate_paths(subdir)
+            .into_iter()
+            .filter(|p| paths.contains(p))
+            .collect()
+    };
+
+    let files = GitHubFiles {
+        client: client.clone(),
+        token: token.to_string(),
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        branch: content_ref,
+        paths,
+        truncated,
+        cache: Mutex::new(HashMap::new()),
+    };
+    files.prefetch(&wanted).await;
+
+    let mut detection = mcp_detect::inspect(&files, subdir).await;
+    detection.branch = Some(form_branch);
+    detection
+}
+
+// ---------------------------------------------------------------------------------------
 
 pub async fn inspect(
     State(state): State<Arc<AppState>>,
@@ -207,8 +357,6 @@ pub async fn inspect(
         }
     };
 
-    // The branch is auto-detected (repo default) unless the caller pinned one, e.g. from a
-    // `/tree/<branch>` URL. `None` here means "resolve the default branch below".
     let requested_branch = body
         .github_branch
         .as_deref()
@@ -222,14 +370,13 @@ pub async fn inspect(
         .filter(|s| !s.is_empty());
 
     let cache_key = format!(
-        "inspect:v1:{}/{}@{}#{}",
+        "inspect:v2:{}/{}@{}#{}",
         owner,
         repo,
         requested_branch.as_deref().unwrap_or(""),
         subdir.unwrap_or("")
     );
 
-    // (3) Redis result cache — a hit skips GitHub, the DB and token decryption entirely.
     if let Some(cached) = state.redis.get::<Option<String>, _>(&cache_key).await.ok().flatten() {
         if let Ok(det) = serde_json::from_str::<Detection>(&cached) {
             tracing::info!("inspect cache HIT {} in {:?}", cache_key, started.elapsed());
@@ -260,53 +407,38 @@ pub async fn inspect(
             AppError::internal("GitHub token decryption failed")
         })?;
 
-    // (2) Shared pooled client — no per-request TLS handshake; HTTP/2 multiplexing.
     let client = state.http.clone();
 
-    // Auto-detect the branch: use the repo's actual default branch (which may be `master`,
-    // `develop`, …) unless the caller pinned one — the user shouldn't have to type it.
-    let branch = match requested_branch {
-        Some(b) => b,
-        None => fetch_default_branch(&client, &token, &owner, &repo)
-            .await
-            .unwrap_or_else(|| "main".to_string()),
+    // PRIMARY: one GraphQL request for branch + all file contents + existence.
+    let read_paths = mcp_detect::candidate_paths(subdir);
+    let probe_paths: Vec<String> = mcp_detect::probe_paths(subdir)
+        .into_iter()
+        .filter(|p| !read_paths.contains(p))
+        .collect();
+    let ref_prefix = match &requested_branch {
+        Some(b) => format!("{}:", b),
+        None => "HEAD:".to_string(),
     };
 
-    let t_tree = Instant::now();
-    let (paths, truncated) = load_tree(&client, &token, &owner, &repo, &branch).await;
-    let tree_ms = t_tree.elapsed();
+    let t_g = Instant::now();
+    let gql = graphql_batch(&client, &token, &owner, &repo, &ref_prefix, &read_paths, &probe_paths).await;
 
-    // (1) Pre-fetch, in parallel, every file the detector will read that actually exists.
-    let wanted: Vec<String> = if truncated {
-        Vec::new()
-    } else {
-        mcp_detect::candidate_paths(subdir)
-            .into_iter()
-            .filter(|p| paths.contains(p))
-            .collect()
+    let (detection, path_kind) = match gql {
+        Some(g) => {
+            let form_branch = requested_branch
+                .clone()
+                .or(g.default_branch)
+                .unwrap_or_else(|| "main".to_string());
+            let mut det = mcp_detect::inspect(&g.files, subdir).await;
+            det.branch = Some(form_branch);
+            (det, "graphql")
+        }
+        None => (
+            rest_detect(&client, &token, &owner, &repo, requested_branch, subdir).await,
+            "rest-fallback",
+        ),
     };
 
-    let files = GitHubFiles {
-        client,
-        token,
-        owner: owner.clone(),
-        repo: repo.clone(),
-        branch: branch.clone(),
-        paths,
-        truncated,
-        cache: Mutex::new(HashMap::new()),
-    };
-
-    let t_pf = Instant::now();
-    files.prefetch(&wanted).await;
-    let prefetch_ms = t_pf.elapsed();
-
-    let t_det = Instant::now();
-    let mut detection = mcp_detect::inspect(&files, subdir).await;
-    detection.branch = Some(branch.clone());
-    let detect_ms = t_det.elapsed();
-
-    // Cache the result (best-effort).
     if let Ok(json) = serde_json::to_string(&detection) {
         let _: Result<(), _> = state
             .redis
@@ -315,8 +447,11 @@ pub async fn inspect(
     }
 
     tracing::info!(
-        "inspect MISS {} tree={:?} prefetch={:?}({} files) detect={:?} total={:?} truncated={}",
-        cache_key, tree_ms, prefetch_ms, wanted.len(), detect_ms, started.elapsed(), truncated
+        "inspect MISS {} via={} in {:?} (fetch={:?})",
+        cache_key,
+        path_kind,
+        started.elapsed(),
+        t_g.elapsed()
     );
 
     Ok(Json(detection))
