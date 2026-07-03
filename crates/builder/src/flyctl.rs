@@ -1635,7 +1635,12 @@ fn generate_stdio_dockerfile_with_existing(_runtime: &str, mcp_path: &str, entry
 # ============================================
 FROM app AS runtime
 
-WORKDIR /app
+# Inherit the app stage's WORKDIR — do NOT reset it to /app. The wrapped Dockerfile
+# built the server in its own working directory (Smithery's default is /usr/src/app)
+# and its entry command is relative to that directory; forcing WORKDIR /app here would
+# run the command where nothing was built (ENOENT at runtime, then restart-loop → the
+# machine reports unhealthy). The adapter is referenced by absolute path below, so it
+# needs no fixed WORKDIR of its own.
 
 # Ensure Node.js is available for the adapter. No-op if the base already has it;
 # otherwise install via the base image's own package manager (apt or apk).
@@ -1679,12 +1684,12 @@ fn extract_env_lines(dockerfile: &str) -> String {
         }
     }
 
-    if env_lines.is_empty() {
-        // Add common paths for Python and Node.js projects as fallback
-        "ENV PATH=\"/app/.venv/bin:/app/node_modules/.bin:$PATH\"".to_string()
-    } else {
-        env_lines.join("\n")
-    }
+    // `FROM app` already inherits the wrapped stage's ENV (including PATH), so when the
+    // original Dockerfile declares no ENV of its own there is nothing to restate. We must
+    // NOT fabricate a `/app`-based PATH here: it is wrong for any image built in a
+    // different WORKDIR (e.g. /usr/src/app) — the same hardcoded-/app assumption that
+    // broke the runtime WORKDIR. Emit nothing and rely on stage inheritance.
+    env_lines.join("\n")
 }
 
 /// Convert a Dockerfile to a named build stage
@@ -2811,6 +2816,47 @@ mod tests {
         let out = apply_provision(df, &p).expect("should inject apt");
         assert!(out.contains("apt-get install"));
         assert!(out.contains("chromium"));
+    }
+
+    // ---- stdio adapter wrapping an existing (foreign) Dockerfile ----
+
+    #[test]
+    fn stdio_wrap_preserves_foreign_workdir() {
+        // A wrapped Dockerfile that builds in a non-/app WORKDIR (Smithery's default is
+        // /usr/src/app). The generated runtime stage must NOT reset WORKDIR to /app, or
+        // the relative entry command runs where nothing was built → ENOENT at runtime.
+        let df = "FROM node:lts-alpine\nWORKDIR /usr/src/app\nCOPY . .\n\
+                  RUN npm install --ignore-scripts && npm run build\nCMD [\"node\", \"dist/index.js\"]\n";
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", df);
+        // Stage 1 keeps the foreign WORKDIR so the build lands in /usr/src/app.
+        assert!(out.contains("WORKDIR /usr/src/app"));
+        // Stage 2 must not clobber it with a hardcoded `WORKDIR /app` instruction
+        // (match the instruction line exactly — a comment mentioning it is fine).
+        assert!(!out.lines().any(|l| l.trim() == "WORKDIR /app"));
+        // The adapter is still referenced by absolute path, independent of cwd.
+        assert!(out.contains("COPY stdio-adapter.cjs /app/stdio-adapter.cjs"));
+        assert!(out.contains(r#"CMD ["node", "/app/stdio-adapter.cjs", "npm", "start"]"#));
+    }
+
+    #[test]
+    fn stdio_wrap_no_env_does_not_fabricate_app_path() {
+        // With no ENV in the original Dockerfile we must not fabricate a /app-based PATH:
+        // `FROM app` already inherits the wrapped stage's ENV.
+        let df = "FROM node:lts-alpine\nWORKDIR /usr/src/app\nCOPY . .\nRUN npm install\n\
+                  CMD [\"node\", \"dist/index.js\"]\n";
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "node dist/index.js", df);
+        assert!(!out.contains("/app/node_modules/.bin"));
+        assert!(!out.contains("/app/.venv/bin"));
+    }
+
+    #[test]
+    fn stdio_wrap_preserves_original_env() {
+        // Real ENV lines from the wrapped Dockerfile (e.g. DesktopCommander's
+        // MCP_CLIENT_DOCKER) must still be carried into the runtime stage.
+        let df = "FROM node:lts-alpine\nENV MCP_CLIENT_DOCKER=true\nWORKDIR /usr/src/app\n\
+                  COPY . .\nRUN npm run build\nCMD [\"node\", \"dist/index.js\"]\n";
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", df);
+        assert!(out.contains("ENV MCP_CLIENT_DOCKER=true"));
     }
 
     // ---- judgment B: COPY/ADD context-source parsing (pure) ----
