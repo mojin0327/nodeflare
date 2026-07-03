@@ -13,6 +13,7 @@ mcp-db = { path = "../db" }
 mcp-auth = { path = "../auth" }
 mcp-queue = { path = "../queue" }
 mcp-github = { path = "../github" }
+mcp-detect = { path = "../detect" }
 mcp-billing = { path = "../billing" }
 mcp-email = { path = "../email" }
 mcp-container = { path = "../container" }

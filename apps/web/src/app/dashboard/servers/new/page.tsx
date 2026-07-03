@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound, Sparkles, Copy } from 'lucide-react';
+import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound, Wand2, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
-import { getLinkedAccounts, getRepos, LinkedGitHubAccount } from '@/lib/github-api';
+import { getLinkedAccounts, getRepos, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
 import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -112,23 +112,57 @@ export default function NewServerPage() {
     setEnvVars((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Copy a ready-made prompt the user can paste into an AI to figure out what to
-  // put in the form. Non-engineers cannot read the repo to know the runtime, entry
-  // command, required env vars, etc. — the AI inspects the repo and answers per field.
-  const [promptCopied, setPromptCopied] = useState(false);
+  // Auto-detect deploy config from the repo (Vercel-style). The backend inspects the
+  // repo with the same algorithm the builder uses, so the values shown are what will
+  // actually build; every field stays editable afterwards.
+  const [detected, setDetected] = useState<RepoDetection | null>(null);
+  const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const copyAiPrompt = useCallback(() => {
-    const repoUrl = formData.github_repo
-      ? `https://github.com/${formData.github_repo}`
-      : t('create.aiPromptRepoPlaceholder');
-    const prompt = t('create.aiPromptTemplate', {
-      repo: repoUrl,
-      branch: formData.github_branch || 'main',
-    });
-    navigator.clipboard.writeText(prompt);
-    setPromptCopied(true);
-    setTimeout(() => setPromptCopied(false), 2000);
-  }, [formData.github_repo, formData.github_branch, t]);
+  const applyDetection = useCallback((d: RepoDetection) => {
+    setDetected(d);
+    setFormData((prev) => ({
+      ...prev,
+      runtime: d.runtime ?? prev.runtime,
+      transport: d.transport ?? prev.transport,
+      root_directory: d.root_directory ?? prev.root_directory,
+      entry_command: d.entry_command ?? prev.entry_command,
+      build_command: d.build_command ?? prev.build_command,
+      mcp_path: d.mcp_path ?? prev.mcp_path,
+      port: d.port ?? prev.port,
+    }));
+    // Prefill env var keys (values left blank for the user, like Vercel).
+    if (d.env_vars.length > 0) {
+      setEnvVars((prev) => {
+        const existing = new Set(prev.map((e) => e.key));
+        const additions = d.env_vars
+          .filter((e) => !existing.has(e.key))
+          .map((e) => ({ key: e.key, value: '' }));
+        const base = prev.filter((e) => e.key.trim() !== '');
+        return [...base, ...additions];
+      });
+    }
+  }, []);
+
+  const inspectMutation = useMutation({
+    mutationFn: inspectRepo,
+    onSuccess: applyDetection,
+  });
+  // `mutate` is stable across renders; capture it so callbacks don't depend on the
+  // whole mutation object.
+  const inspectMutate = inspectMutation.mutate;
+
+  const runDetect = useCallback(
+    (repo: string, branch: string, subdir?: string) => {
+      if (!repo) return;
+      inspectMutate({
+        github_repo: repo,
+        github_branch: branch || 'main',
+        account_id: selectedAccountId || undefined,
+        root_directory: subdir,
+      });
+    },
+    [inspectMutate, selectedAccountId]
+  );
 
   const generateSlug = useCallback((name: string) => {
     return name
@@ -192,11 +226,16 @@ export default function NewServerPage() {
         github_branch: parsed.branch || 'main',
         root_directory: parsed.subdir || '',
       }));
+      // Debounce auto-detection while the user is still typing/pasting the URL.
+      if (detectTimer.current) clearTimeout(detectTimer.current);
+      detectTimer.current = setTimeout(() => {
+        runDetect(`${parsed.owner}/${parsed.repo}`, parsed.branch || 'main', parsed.subdir);
+      }, 700);
     } else {
       setPublicRepoError('Invalid format. Use owner/repo or full GitHub URL');
       setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
     }
-  }, [parseGitHubUrl, generateSlug]);
+  }, [parseGitHubUrl, generateSlug, runDetect]);
 
   const handleSelectRepo = (repo: GitHubRepo) => {
     setSelectedRepo(repo);
@@ -208,6 +247,8 @@ export default function NewServerPage() {
       github_repo: repo.full_name,
       github_branch: repo.default_branch,
     }));
+    // Auto-detect deploy config for the selected repo.
+    runDetect(repo.full_name, repo.default_branch, undefined);
   };
 
   const createMutation = useMutation({
@@ -548,31 +589,40 @@ export default function NewServerPage() {
               {t('create.advancedSettings')}
             </div>
 
-            {/* Ask-an-AI helper: copies a prompt so non-engineers can have an AI
-                read the repo and tell them what to enter below. */}
-            <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3">
+            {/* Auto-detect: inspect the repo and pre-fill the fields below (editable). */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
               <div className="flex items-start gap-3">
-                <Sparkles className="w-4 h-4 text-violet-500 mt-0.5 flex-shrink-0" />
+                <Wand2 className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{t('create.aiPromptTitle')}</p>
-                  <p className="text-xs text-gray-500 mt-1">{t('create.aiPromptHelp')}</p>
+                  <p className="text-sm font-medium text-gray-800">{t('create.autoDetectTitle')}</p>
+                  {inspectMutation.isPending ? (
+                    <p className="text-xs text-gray-500 mt-1">{t('create.autoDetectRunning')}</p>
+                  ) : inspectMutation.isError ? (
+                    <p className="text-xs text-amber-600 mt-1">{t('create.autoDetectError')}</p>
+                  ) : detected ? (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {t('create.autoDetectDone')}
+                      {detected.is_monorepo_member ? ` · ${t('create.autoDetectMonorepo')}` : ''}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">{t('create.autoDetectIdle')}</p>
+                  )}
+                  {detected?.warnings?.map((w, i) => (
+                    <p key={i} className="text-xs text-amber-600 mt-1">{w}</p>
+                  ))}
                 </div>
                 <button
                   type="button"
-                  onClick={copyAiPrompt}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex-shrink-0"
+                  onClick={() => runDetect(formData.github_repo, formData.github_branch || 'main', formData.root_directory || undefined)}
+                  disabled={!formData.github_repo || inspectMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex-shrink-0"
                 >
-                  {promptCopied ? (
-                    <>
-                      <Check className="w-4 h-4" />
-                      {t('create.aiPromptCopied')}
-                    </>
+                  {inspectMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      {t('create.aiPromptButton')}
-                    </>
+                    <RefreshCw className="w-4 h-4" />
                   )}
+                  {t('create.autoDetectButton')}
                 </button>
               </div>
             </div>

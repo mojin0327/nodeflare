@@ -4,6 +4,7 @@ pub mod console;
 pub mod contact;
 pub mod github;
 pub mod health;
+pub mod inspect;
 pub mod openapi;
 pub mod servers;
 pub mod wireguard;
@@ -77,6 +78,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Non-scoped aggregate lists (all of a user's workspaces). DEPRECATED: kept only
         // for backward compat during the workspace-scoped migration so the currently
         // deployed frontend keeps working; remove once the scoped frontend is live.
+        .route("/servers/inspect", post(inspect::inspect))
         .route("/servers", get(servers::list_all))
         .route("/servers/minimal", get(servers::list_all_minimal))
         .route("/servers/basic", get(servers::list_all_basic))

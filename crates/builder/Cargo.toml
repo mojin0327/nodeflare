@@ -14,6 +14,7 @@ mcp-queue = { path = "../queue" }
 mcp-billing = { path = "../billing" }
 mcp-auth = { path = "../auth" }
 mcp-github = { path = "../github" }
+mcp-detect = { path = "../detect" }
 mcp-email = { path = "../email" }
 
 # Async

@@ -44,6 +44,41 @@ export const getRepos = (accountId?: string): Promise<GitHubRepo[]> => {
   return api.get(path);
 };
 
+export interface DetectedEnvVar {
+  key: string;
+  description?: string | null;
+  required: boolean;
+  secret: boolean;
+}
+
+/** Auto-detected deploy configuration for a repo (see the `/servers/inspect` endpoint). */
+export interface RepoDetection {
+  runtime?: 'node' | 'python' | 'go' | 'rust' | 'docker';
+  transport?: 'stdio' | 'sse';
+  root_directory?: string;
+  build_command?: string;
+  entry_command?: string;
+  mcp_path?: string;
+  port?: number;
+  env_vars: DetectedEnvVar[];
+  is_monorepo_member: boolean;
+  signals: { field: string; source: string }[];
+  warnings: string[];
+}
+
+/**
+ * Inspect a GitHub repo and auto-detect the server-create form values. The same
+ * detection algorithm the builder runs, so what's shown is what will build.
+ */
+export const inspectRepo = (body: {
+  github_repo: string;
+  github_branch?: string;
+  account_id?: string;
+  root_directory?: string;
+}): Promise<RepoDetection> => {
+  return api.post('/servers/inspect', body);
+};
+
 /**
  * Get the link URL to initiate GitHub OAuth for account linking
  * @param returnTo - Optional path to redirect to after linking

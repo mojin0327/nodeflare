@@ -509,20 +509,7 @@ fn dockerfile_context_fit(dockerfile: &str, context_dir: &Path) -> DockerfileCon
 /// Handles both the array form and the `{ "packages": [...] }` object form.
 /// Empty when the field is absent.
 pub(crate) fn parse_workspaces(package_json: &str) -> Vec<String> {
-    let Ok(pkg) = serde_json::from_str::<serde_json::Value>(package_json) else {
-        return Vec::new();
-    };
-    match pkg.get("workspaces") {
-        Some(serde_json::Value::Array(a)) => {
-            a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
-        }
-        Some(serde_json::Value::Object(o)) => o
-            .get("packages")
-            .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    }
+    mcp_detect::parse::parse_workspaces(package_json)
 }
 
 /// Extract package globs from a pnpm-workspace.yaml `packages:` list. Minimal and
@@ -530,48 +517,7 @@ pub(crate) fn parse_workspaces(package_json: &str) -> Vec<String> {
 /// the `packages:` key (block form) or `packages: [...]` (inline flow form), strips
 /// quotes, and skips negation (`!`) exclusion patterns.
 pub(crate) fn parse_pnpm_workspace(yaml: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut in_packages = false;
-    for raw in yaml.lines() {
-        let line = raw.trim_end_matches('\r');
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indented = line.starts_with([' ', '\t']);
-        if !indented {
-            // A new top-level key ends any previous block; check if it's `packages:`.
-            in_packages = false;
-            if let Some(rest) = trimmed.strip_prefix("packages:") {
-                let rest = rest.trim();
-                if rest.starts_with('[') {
-                    out.extend(parse_inline_glob_array(rest));
-                } else {
-                    in_packages = true;
-                }
-            }
-            continue;
-        }
-        if in_packages {
-            if let Some(item) = trimmed.strip_prefix('-') {
-                let g = item.trim().trim_matches('"').trim_matches('\'').to_string();
-                if !g.is_empty() && !g.starts_with('!') {
-                    out.push(g);
-                }
-            }
-        }
-    }
-    out
-}
-
-fn parse_inline_glob_array(s: &str) -> Vec<String> {
-    s.trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(|p| p.trim().trim_matches('"').trim_matches('\'').to_string())
-        .filter(|g| !g.is_empty() && !g.starts_with('!'))
-        .collect()
+    mcp_detect::parse::parse_pnpm_workspace(yaml)
 }
 
 /// Detect workspace member globs for a repo directory across npm/yarn
@@ -620,30 +566,7 @@ fn list_workspace_members(root: &Path, globs: &[String]) -> Vec<String> {
 /// workspace globs. Supports `prefix/**` (any depth), `prefix/*` (direct child),
 /// `*` and literal forms.
 pub(crate) fn subdir_is_workspace_member(subdir: &str, globs: &[String]) -> bool {
-    let subdir = subdir.trim_matches('/');
-    globs.iter().any(|g| {
-        let g = g.trim_matches('/');
-        if let Some(prefix) = g.strip_suffix("/**") {
-            let prefix = prefix.trim_matches('/');
-            prefix.is_empty()
-                || (subdir.len() > prefix.len()
-                    && subdir.starts_with(prefix)
-                    && subdir.as_bytes().get(prefix.len()) == Some(&b'/'))
-        } else if let Some(prefix) = g.strip_suffix("/*") {
-            let prefix = prefix.trim_matches('/');
-            match subdir.strip_prefix(prefix) {
-                Some(rest) => {
-                    let rest = rest.trim_start_matches('/');
-                    !rest.is_empty() && !rest.contains('/')
-                }
-                None => false,
-            }
-        } else if g == "*" {
-            !subdir.is_empty() && !subdir.contains('/')
-        } else {
-            g == subdir
-        }
-    })
+    mcp_detect::parse::subdir_is_workspace_member(subdir, globs)
 }
 
 /// Startup entry for a workspace member, resolved with the workspace ROOT's package
@@ -666,28 +589,7 @@ pub(crate) async fn detect_member_entry(root: &Path, member: &Path, runtime: &st
 /// via `--filter ./<subdir>` (pnpm's workspace selector). Any other shape is returned
 /// unchanged (we can't safely rewrite it).
 pub(crate) fn prefix_entry_with_subdir(entry: &str, subdir: &str) -> String {
-    let subdir = subdir.trim_matches('/');
-    if subdir.is_empty() {
-        return entry.to_string();
-    }
-    let parts: Vec<&str> = entry.split_whitespace().collect();
-    match parts.as_slice() {
-        ["node", script, rest @ ..] if !script.starts_with('/') && !script.starts_with('-') => {
-            let mut out = format!("node {}/{}", subdir, script);
-            for r in rest {
-                out.push(' ');
-                out.push_str(r);
-            }
-            out
-        }
-        ["npm", rest @ ..] if !rest.is_empty() => {
-            format!("npm --prefix {} {}", subdir, rest.join(" "))
-        }
-        ["pnpm", rest @ ..] if !rest.is_empty() => {
-            format!("pnpm --filter ./{} {}", subdir, rest.join(" "))
-        }
-        _ => entry.to_string(),
-    }
+    mcp_detect::parse::prefix_entry_with_subdir(entry, subdir)
 }
 
 #[derive(Debug, Deserialize)]
@@ -767,19 +669,20 @@ pub(crate) enum NodePm {
 }
 
 impl NodePm {
-    /// The CLI binary name (`npm` / `pnpm`).
-    fn cli(self) -> &'static str {
-        match self {
-            NodePm::Npm => "npm",
-            NodePm::Pnpm => "pnpm",
-        }
-    }
-
     /// The `run` prefix used to invoke package scripts (`npm run` / `pnpm run`).
     fn runner(self) -> &'static str {
         match self {
             NodePm::Npm => "npm run",
             NodePm::Pnpm => "pnpm run",
+        }
+    }
+
+    /// Map to the shared detector's package-manager enum, so entry detection uses the
+    /// single shared rule (crates/detect). Only npm/pnpm are distinguished here.
+    fn to_shared(self) -> mcp_detect::parse::NodePm {
+        match self {
+            NodePm::Npm => mcp_detect::parse::NodePm::Npm,
+            NodePm::Pnpm => mcp_detect::parse::NodePm::Pnpm,
         }
     }
 }
@@ -1023,83 +926,19 @@ fn parse_go_deps(go_mod: &str) -> Vec<String> {
 /// `pm` selects the script runner so a pnpm project runs `pnpm start`, matching how
 /// its dependencies were installed (the `node <path>` forms are runner-agnostic).
 fn parse_node_entry(package_json: &str, pm: NodePm) -> Option<String> {
-    let pkg: serde_json::Value = serde_json::from_str(package_json).ok()?;
-
-    // 1. An explicit `start` script — let the package manager run what the project defined.
-    if pkg
-        .get("scripts")
-        .and_then(|s| s.get("start"))
-        .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false)
-    {
-        return Some(format!("{} start", pm.cli()));
-    }
-
-    // 2. `main` — the package's documented entry module.
-    if let Some(main) = pkg.get("main").and_then(|v| v.as_str()) {
-        if !main.trim().is_empty() {
-            return Some(format!("node {}", main.trim()));
-        }
-    }
-
-    // 3. `bin` — a CLI executable. Prefer the entry matching the package name,
-    //    otherwise the first declared binary.
-    match pkg.get("bin") {
-        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => {
-            return Some(format!("node {}", path.trim()));
-        }
-        Some(serde_json::Value::Object(map)) => {
-            let name = pkg.get("name").and_then(|v| v.as_str());
-            if let Some(n) = name {
-                if let Some(path) = map.get(n).and_then(|v| v.as_str()) {
-                    if !path.trim().is_empty() {
-                        return Some(format!("node {}", path.trim()));
-                    }
-                }
-            }
-            for path in map.values().filter_map(|v| v.as_str()) {
-                if !path.trim().is_empty() {
-                    return Some(format!("node {}", path.trim()));
-                }
-            }
-        }
-        _ => {}
-    }
-
-    None
+    mcp_detect::parse::parse_node_entry(package_json, pm.to_shared())
 }
 
 /// Extract the first console-script name from a pyproject.toml `[project.scripts]` table.
 /// These names are installed on PATH by pip/uv, so running the bare name starts the server.
 fn parse_pyproject_script(pyproject: &str) -> Option<String> {
-    let val: toml::Value = toml::from_str(pyproject).ok()?;
-    let scripts = val.get("project")?.get("scripts")?.as_table()?;
-    scripts.keys().next().cloned()
+    mcp_detect::parse::parse_pyproject_script(pyproject)
 }
 
 /// Determine the binary name produced by `cargo build`.
 /// Uses the first `[[bin]]` entry's name, falling back to `[package].name`.
 fn parse_cargo_bin(cargo_toml: &str) -> Option<String> {
-    let val: toml::Value = toml::from_str(cargo_toml).ok()?;
-
-    if let Some(name) = val
-        .get("bin")
-        .and_then(|b| b.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|first| first.get("name"))
-        .and_then(|n| n.as_str())
-    {
-        if !name.trim().is_empty() {
-            return Some(name.trim().to_string());
-        }
-    }
-
-    val.get("package")
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    mcp_detect::parse::parse_cargo_bin(cargo_toml)
 }
 
 /// Generate Dockerfile if not present
