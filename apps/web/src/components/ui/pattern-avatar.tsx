@@ -1,7 +1,6 @@
 import { ReactNode } from 'react';
 
-// FNV-1a hash → unsigned 32-bit int. Deterministic so each seed keeps a
-// stable pattern across renders and sessions.
+// FNV-1a hash → unsigned 32-bit seed.
 function hashSeed(seed: string): number {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) {
@@ -11,61 +10,78 @@ function hashSeed(seed: string): number {
   return h >>> 0;
 }
 
+// mulberry32 PRNG — a small procedural stream of [0,1) values from one seed.
+function mulberry32(a: number): () => number {
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const COLS = 5;
+const ROWS = 5;
+const HALF = 3; // left half + centre column; mirrored for symmetry
+
 /**
- * A small geometric (Bauhaus-style) avatar generated deterministically from a
- * seed. Replaces flat/gradient color fills — every seed gets its own layout of
- * shapes drawn from a single hue, so an overlaid label stays legible.
+ * A procedural, seamless pixel-grid identicon generated deterministically from
+ * a seed. The 5×5 lattice is left/right mirrored for a tessellated look, and
+ * every cell is drawn in one of two shades of a single seed-derived hue on a
+ * light tint of the same hue.
  *
- * Pass sizing/font via `className` (e.g. "h-8 w-8 text-sm font-semibold");
- * the label inherits font-size from it.
+ * Pass sizing/shape via `className` / `rounded`. No label — the pattern itself
+ * is the identifier.
  */
 export function PatternAvatar({
   seed,
-  label,
   rounded = 'rounded-full',
   className = '',
   children,
 }: {
   seed: string;
-  label?: ReactNode;
   rounded?: string;
   className?: string;
   children?: ReactNode;
 }) {
-  const h = hashSeed(seed || 'x');
-  const bit = (shift: number, mod: number) => (h >>> shift) % mod;
+  const rand = mulberry32(hashSeed(seed || 'x'));
+  const hue = Math.floor(rand() * 360);
+  const primary = `hsl(${hue} 62% 55%)`;
+  const secondary = `hsl(${(hue + 28) % 360} 68% 64%)`;
+  const bg = `hsl(${hue} 42% 95%)`;
 
-  const base = h % 360;
-  const bg = `hsl(${base} 58% 52%)`;
-  const shade = `hsl(${base} 60% 40%)`; // darker, same hue
-  const tint = `hsl(${(base + 16) % 360} 62% 63%)`; // lighter neighbour
-  const accent = `hsl(${(base + 210) % 360} 55% 58%)`; // complementary accent
-
-  const rectRot = 15 + bit(3, 60);
-  const cx = 18 + bit(6, 44);
-  const cy = 16 + bit(9, 48);
-  const barRot = bit(12, 4) * 90;
+  const cells: number[][] = [];
+  for (let y = 0; y < ROWS; y++) {
+    const row: number[] = [];
+    for (let x = 0; x < HALF; x++) {
+      const r = rand();
+      row[x] = r < 0.45 ? 0 : r < 0.82 ? 1 : 2; // empty / primary / secondary
+    }
+    for (let x = HALF; x < COLS; x++) row[x] = row[COLS - 1 - x];
+    cells.push(row);
+  }
 
   return (
-    <span
-      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden ${rounded} ${className}`}
-    >
-      <svg
-        viewBox="0 0 80 80"
-        className="absolute inset-0 h-full w-full"
-        preserveAspectRatio="xMidYMid slice"
-        aria-hidden="true"
-      >
-        <rect width="80" height="80" fill={bg} />
-        <rect x="-20" y="34" width="120" height="120" fill={shade} transform={`rotate(${rectRot} 40 40)`} />
-        <circle cx={cx} cy={cy} r="24" fill={tint} opacity="0.9" />
-        <rect x="46" y="-20" width="20" height="120" fill={accent} opacity="0.75" transform={`rotate(${barRot} 40 40)`} />
+    <span className={`relative inline-flex shrink-0 overflow-hidden ${rounded} ${className}`}>
+      <svg viewBox="0 0 5 5" className="h-full w-full" aria-hidden="true">
+        <rect width="5" height="5" fill={bg} />
+        {cells.flatMap((row, y) =>
+          row.map((v, x) =>
+            v === 0 ? null : (
+              <rect
+                key={`${x}-${y}`}
+                x={x + 0.06}
+                y={y + 0.06}
+                width={0.88}
+                height={0.88}
+                rx={0.18}
+                fill={v === 1 ? primary : secondary}
+              />
+            )
+          )
+        )}
       </svg>
-      {label != null && (
-        <span className="relative z-10 leading-none text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]">
-          {label}
-        </span>
-      )}
       {children}
     </span>
   );

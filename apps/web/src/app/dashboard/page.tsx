@@ -274,9 +274,8 @@ function ServerStatusRow({
       <div className="relative w-8 h-8 flex-shrink-0">
         <PatternAvatar
           seed={server.id}
-          label={server.name.charAt(0).toUpperCase()}
           rounded="rounded-md"
-          className="w-8 h-8 text-xs font-semibold"
+          className="w-8 h-8"
         />
         {server.status === 'running' && (
           <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white ${pulse ? 'animate-ping' : ''}`} />

@@ -25,11 +25,7 @@ function PlanBadge({ plan, t }: { plan: string; t: (key: string) => string }) {
   );
 }
 
-function initials(name: string): string {
-  return name.trim().charAt(0).toUpperCase() || 'W';
-}
-
-// Round, geometric identicon per workspace (pattern derived from the id).
+// Round, procedural pixel-grid identicon per workspace (pattern from the id).
 function WorkspaceAvatar({
   name,
   seed,
@@ -41,12 +37,11 @@ function WorkspaceAvatar({
   size?: 'md' | 'lg';
   active?: boolean;
 }) {
-  const dim = size === 'lg' ? 'h-8 w-8 text-sm' : 'h-6 w-6 text-[11px]';
+  const dim = size === 'lg' ? 'h-8 w-8' : 'h-6 w-6';
   return (
     <PatternAvatar
       seed={seed || name}
-      label={initials(name)}
-      className={`${dim} font-semibold shadow-sm ring-1 ring-black/5 ${
+      className={`${dim} shadow-sm ring-1 ring-black/5 ${
         active ? 'ring-2 ring-offset-1 ring-violet-400/70' : ''
       }`}
     />
