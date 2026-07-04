@@ -41,6 +41,7 @@ function WorkspaceAvatar({
   return (
     <PatternAvatar
       seed={seed || name}
+      variant="geo"
       className={`${dim} shadow-sm ring-1 ring-black/5 ${
         active ? 'ring-2 ring-offset-1 ring-violet-400/70' : ''
       }`}
