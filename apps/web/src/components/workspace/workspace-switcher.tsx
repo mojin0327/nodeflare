@@ -7,6 +7,7 @@ import { Check, ChevronsUpDown, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Workspace, getApiErrorCode, getApiErrorMessage } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
+import { PatternAvatar } from '@/components/ui/pattern-avatar';
 
 const PLAN_BADGE_CLASSES: Record<string, string> = {
   free: 'bg-gray-100 text-gray-600',
@@ -28,14 +29,7 @@ function initials(name: string): string {
   return name.trim().charAt(0).toUpperCase() || 'W';
 }
 
-// Deterministic hue from a seed so every workspace gets its own stable color.
-function hashHue(seed: string): number {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
-  return h;
-}
-
-// Round, gradient avatar — a small identicon-style mark per workspace.
+// Round, geometric identicon per workspace (pattern derived from the id).
 function WorkspaceAvatar({
   name,
   seed,
@@ -47,18 +41,15 @@ function WorkspaceAvatar({
   size?: 'md' | 'lg';
   active?: boolean;
 }) {
-  const h1 = hashHue(seed || name);
-  const h2 = (h1 + 38) % 360;
   const dim = size === 'lg' ? 'h-8 w-8 text-sm' : 'h-6 w-6 text-[11px]';
   return (
-    <span
-      className={`relative flex ${dim} shrink-0 items-center justify-center rounded-full font-semibold text-white shadow-sm ring-1 ring-black/5 ${
+    <PatternAvatar
+      seed={seed || name}
+      label={initials(name)}
+      className={`${dim} font-semibold shadow-sm ring-1 ring-black/5 ${
         active ? 'ring-2 ring-offset-1 ring-violet-400/70' : ''
       }`}
-      style={{ backgroundImage: `linear-gradient(135deg, hsl(${h1} 72% 56%), hsl(${h2} 78% 44%))` }}
-    >
-      <span className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">{initials(name)}</span>
-    </span>
+    />
   );
 }
 

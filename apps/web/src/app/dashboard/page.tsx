@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
 import { McpServerBasic } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
+import { PatternAvatar } from '@/components/ui/pattern-avatar';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -35,13 +36,6 @@ const STATUS_COLORS: Record<string, string> = {
   inactive: 'bg-gray-400',
 };
 
-const GRADIENT_COLORS = [
-  'from-blue-400 to-cyan-500',
-  'from-violet-400 to-purple-500',
-  'from-emerald-400 to-teal-500',
-  'from-amber-400 to-orange-500',
-  'from-pink-400 to-rose-500',
-];
 
 // Pure function - no need for useCallback
 function formatDate(dateStr: string): string {
@@ -197,8 +191,8 @@ export default function DashboardPage() {
               </button>
             </div>
           ) : (
-            servers?.slice(0, 6).map((server, index) => (
-              <ServerStatusRow key={server.id} server={server} index={index} t={tServers} />
+            servers?.slice(0, 6).map((server) => (
+              <ServerStatusRow key={server.id} server={server} t={tServers} />
             ))
           )}
         </div>
@@ -255,11 +249,9 @@ export default function DashboardPage() {
 
 function ServerStatusRow({
   server,
-  index,
   t,
 }: {
   server: McpServerBasic;
-  index: number;
   t: (key: string) => string;
 }) {
   const [pulse, setPulse] = useState(false);
@@ -279,8 +271,13 @@ function ServerStatusRow({
       href={`/dashboard/servers/${server.id}`}
       className="group flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
     >
-      <div className={`relative w-8 h-8 rounded-md bg-gradient-to-br ${GRADIENT_COLORS[index % 5]} flex items-center justify-center flex-shrink-0`}>
-        <span className="text-white font-semibold text-xs">{server.name.charAt(0).toUpperCase()}</span>
+      <div className="relative w-8 h-8 flex-shrink-0">
+        <PatternAvatar
+          seed={server.id}
+          label={server.name.charAt(0).toUpperCase()}
+          rounded="rounded-md"
+          className="w-8 h-8 text-xs font-semibold"
+        />
         {server.status === 'running' && (
           <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white ${pulse ? 'animate-ping' : ''}`} />
         )}

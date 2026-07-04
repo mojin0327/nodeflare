@@ -563,7 +563,7 @@ export default function NewServerPage() {
           ) : (
             // Public URL Input
             <div className="space-y-3">
-              <div className="flex items-center gap-3 px-4 py-2 rounded-xl border border-input bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-100 transition-all">
+              <div className="flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 text-sm ring-offset-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
                 <SiGithub className="w-5 h-5 text-gray-400 flex-shrink-0" />
                 <input
                   type="text"
@@ -1030,22 +1030,21 @@ export default function NewServerPage() {
         <div className="flex justify-end gap-2.5 pt-4 border-t border-gray-100">
           <Button
             type="button"
-            variant="outline"
             onClick={() => router.back()}
-            className="h-10 px-4 rounded-lg border-[#d1d5db] text-[#374151] text-sm font-medium hover:bg-[#f3f4f6] transition-colors duration-200"
+            className="inline-flex items-center justify-center h-7 px-2.5 text-xs font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-[10px] hover:bg-gray-200 active:bg-gray-300 transition-colors"
           >
             {tCommon('cancel')}
           </Button>
           <Button
             type="submit"
             disabled={createMutation.isPending || !workspaceId || !formData.github_repo}
-            className="h-10 px-4 rounded-lg bg-violet-500 hover:bg-violet-600 border border-violet-600 text-white text-sm font-medium gap-2 transition-colors duration-200"
+            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-violet-600 border border-violet-700 rounded-[10px] hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {createMutation.isPending ? (
-              <div className="w-4 h-4 border-2 rounded-full border-white/30 border-t-white animate-spin" />
+              <div className="w-3.5 h-3.5 border-2 rounded-full border-white/30 border-t-white animate-spin" />
             ) : (
               <>
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 {t('create.submit')}
               </>
             )}

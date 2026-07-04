@@ -245,7 +245,7 @@ export default function NewOAuthAppPage() {
           <Button
             type="button"
             onClick={() => router.push('/dashboard/auth/oauth')}
-            className="h-10 px-4 rounded-lg bg-violet-500 hover:bg-violet-600 border border-violet-600 text-white text-sm font-medium gap-2 transition-colors duration-200"
+            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-violet-600 border border-violet-700 rounded-[10px] hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {tCommon('done')}
           </Button>
@@ -499,22 +499,21 @@ export default function NewOAuthAppPage() {
         <div className="flex justify-end gap-2.5 pt-4 border-t border-gray-100">
           <Button
             type="button"
-            variant="outline"
             onClick={() => router.push('/dashboard/auth/oauth')}
-            className="h-10 px-4 rounded-lg border-[#d1d5db] text-[#374151] text-sm font-medium hover:bg-[#f3f4f6] transition-colors duration-200"
+            className="inline-flex items-center justify-center h-7 px-2.5 text-xs font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-[10px] hover:bg-gray-200 active:bg-gray-300 transition-colors"
           >
             {tCommon('cancel')}
           </Button>
           <Button
             type="submit"
             disabled={createMutation.isPending || !workspaceId || !selectedServerId}
-            className="h-10 px-4 rounded-lg bg-violet-500 hover:bg-violet-600 border border-violet-600 text-white text-sm font-medium gap-2 transition-colors duration-200"
+            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-violet-600 border border-violet-700 rounded-[10px] hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {createMutation.isPending ? (
-              <div className="w-4 h-4 border-2 rounded-full border-white/30 border-t-white animate-spin" />
+              <div className="w-3.5 h-3.5 border-2 rounded-full border-white/30 border-t-white animate-spin" />
             ) : (
               <>
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 {t('create.submit')}
               </>
             )}
