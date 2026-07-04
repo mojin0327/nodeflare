@@ -48,18 +48,30 @@ impl ServerRepository {
         Ok(server)
     }
 
-    pub async fn find_by_endpoint_slug(pool: &PgPool, slug: &str) -> Result<Option<McpServer>> {
-        // Find server by slug - access control is handled by API key validation
+    /// Resolve a running server by its workspace slug + server slug.
+    ///
+    /// The proxy's public host is `<workspace_slug>--<server_slug>.<base_domain>`.
+    /// A server slug is only unique *within a workspace* (`UNIQUE (workspace_id, slug)`),
+    /// so slug alone is ambiguous across workspaces; the workspace slug — which IS globally
+    /// unique (`workspaces.slug UNIQUE`) — disambiguates, making this lookup deterministic.
+    /// Access control is handled downstream by API key / OAuth validation.
+    pub async fn find_by_workspace_and_server_slug(
+        pool: &PgPool,
+        workspace_slug: &str,
+        server_slug: &str,
+    ) -> Result<Option<McpServer>> {
         let server = sqlx::query_as::<_, McpServer>(
             r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
-            FROM mcp_servers
-            WHERE slug = $1 AND status = 'running'
+            SELECT s.id, s.workspace_id, s.name, s.slug, s.description, s.github_repo, s.github_branch,
+                   s.github_installation_id, s.runtime, s.visibility, s.access_mode, s.transport, s.status, s.endpoint_url,
+                   s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.created_at, s.updated_at
+            FROM mcp_servers s
+            JOIN workspaces w ON w.id = s.workspace_id
+            WHERE w.slug = $1 AND s.slug = $2 AND s.status = 'running'
             "#,
         )
-        .bind(slug)
+        .bind(workspace_slug)
+        .bind(server_slug)
         .fetch_optional(pool)
         .await?;
 

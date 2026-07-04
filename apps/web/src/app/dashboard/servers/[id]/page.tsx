@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useSetPageHeader } from '../../page-header';
 import { useWorkspace } from '@/hooks/use-workspace';
+import { mcpPublicUrl } from '@/lib/mcp-url';
 
 // Static status colors - moved outside component to prevent recreation
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -316,6 +317,11 @@ export default function ServerDetailPage() {
 
   const statusStyle = STATUS_COLORS[effectiveStatus] || STATUS_COLORS.inactive;
 
+  // Resolve the workspace slug for the public proxy URL: match the server's
+  // workspace by id, falling back to the active workspace.
+  const workspaceSlug =
+    workspaces?.find((w) => w.id === server.workspace_id)?.slug ?? activeWorkspace?.slug;
+
   // tabs - no useMemo needed, t function from useTranslations may be unstable
   const tabs = [
     { id: 'deployments' as const, label: t('detail.deployments'), count: deployments?.length },
@@ -448,17 +454,16 @@ export default function ServerDetailPage() {
 
       {/* Info Pills */}
       <div className="flex items-center gap-2 text-xs sm:text-sm overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible">
-        {server.status === 'running' && server.endpoint_url && (
+        {server.status === 'running' && server.endpoint_url && workspaceSlug && (
           <button
             onClick={() => {
-              const mcpPath = (server.mcp_path || '/mcp').startsWith('/') ? (server.mcp_path || '/mcp') : `/${server.mcp_path}`;
-              navigator.clipboard.writeText(`https://${server.slug}.${process.env.NEXT_PUBLIC_PROXY_BASE_DOMAIN || 'nodeflare.tech'}${mcpPath}`);
+              navigator.clipboard.writeText(mcpPublicUrl(workspaceSlug, server.slug, server.mcp_path));
             }}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-violet-50 hover:bg-violet-100 rounded-full transition-colors group flex-shrink-0"
             title={t('detail.copyEndpoint')}
           >
             <span className="text-gray-500 hidden sm:inline">{t('detail.endpoint')}</span>
-            <code className="font-medium text-violet-700 font-mono text-xs sm:text-sm truncate max-w-[150px] sm:max-w-none">{server.slug}.{process.env.NEXT_PUBLIC_PROXY_BASE_DOMAIN || 'nodeflare.tech'}{(server.mcp_path || '/mcp').startsWith('/') ? (server.mcp_path || '/mcp') : `/${server.mcp_path}`}</code>
+            <code className="font-medium text-violet-700 font-mono text-xs sm:text-sm truncate max-w-[150px] sm:max-w-none">{mcpPublicUrl(workspaceSlug, server.slug, server.mcp_path)}</code>
             <Copy className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-violet-400 group-hover:text-violet-600 flex-shrink-0" />
           </button>
         )}

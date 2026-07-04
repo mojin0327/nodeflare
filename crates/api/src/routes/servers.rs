@@ -440,6 +440,29 @@ pub async fn create(
         })));
     }
 
+    // The server's public host is `<workspace_slug>--<server_slug>.<base_domain>`, a single
+    // DNS label. Forbid `--` in the server slug (it is the workspace/server separator the
+    // proxy splits on) and cap the combined label at the 63-char DNS-label limit so the
+    // deployed subdomain is always valid and unambiguously routable.
+    if body.slug.contains("--") {
+        return Err(AppError::bad_request(
+            "INVALID_SLUG",
+            "Server slug cannot contain consecutive hyphens ('--').",
+        ).with_details(json!({ "conflicting_slug": body.slug })));
+    }
+    if workspace.slug.len() + 2 + body.slug.len() > 63 {
+        return Err(AppError::bad_request(
+            "SLUG_TOO_LONG",
+            "The combined workspace and server slug is too long for a subdomain (the '<workspace>--<server>' host label must be at most 63 characters).",
+        ).with_details(json!({
+            "workspace_slug": workspace.slug,
+            "workspace_slug_len": workspace.slug.len(),
+            "server_slug": body.slug,
+            "server_slug_len": body.slug.len(),
+            "max_label_len": 63
+        })));
+    }
+
     // Validate GitHub repo format (avoid Vec allocation)
     let (owner, repo) = {
         let mut parts = body.github_repo.split('/');

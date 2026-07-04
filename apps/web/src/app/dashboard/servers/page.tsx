@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
 import { McpServerList } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
+import { mcpPublicUrl } from '@/lib/mcp-url';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -105,7 +106,12 @@ export default function ServersPage() {
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {servers?.map((server) => (
-            <ServerCard key={server.id} server={server} t={t} />
+            <ServerCard
+              key={server.id}
+              server={server}
+              workspaceSlug={activeWorkspace?.slug}
+              t={t}
+            />
           ))}
         </div>
       )}
@@ -130,7 +136,7 @@ const statusColors: Record<string, string> = {
   inactive: 'bg-gray-500',
 };
 
-function ServerCard({ server, t }: { server: McpServerList; t: (key: string) => string }) {
+function ServerCard({ server, workspaceSlug, t }: { server: McpServerList; workspaceSlug?: string; t: (key: string) => string }) {
   const runtime = runtimeStyles[server.runtime] || runtimeStyles.node;
 
   return (
@@ -171,9 +177,9 @@ function ServerCard({ server, t }: { server: McpServerList; t: (key: string) => 
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-200">
-            {server.endpoint_url ? (
+            {server.endpoint_url && workspaceSlug ? (
               <code className="text-xs text-gray-600 break-all">
-                {server.endpoint_url}
+                {mcpPublicUrl(workspaceSlug, server.slug)}
               </code>
             ) : (
               <span className="text-xs text-gray-400 italic">{t('noEndpoint')}</span>

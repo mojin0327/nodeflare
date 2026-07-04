@@ -519,39 +519,53 @@ async fn proxy_handler(
     Ok(response)
 }
 
-async fn resolve_server(state: &ProxyState, slug: &str) -> Result<CachedServer, ProxyError> {
-    tracing::debug!("resolve_server: looking up slug={}", slug);
+/// Resolve the server addressed by a request's host label.
+///
+/// `label` is the single subdomain label extracted from the host, i.e. the
+/// `<workspace_slug>--<server_slug>` in `<workspace_slug>--<server_slug>.<base_domain>`.
+/// Server slugs are only unique *within a workspace*, so the workspace slug (globally
+/// unique) is required to route deterministically — the old single-label `<slug>` form is
+/// intentionally no longer accepted. The full label is the cache key (also unique).
+async fn resolve_server(state: &ProxyState, label: &str) -> Result<CachedServer, ProxyError> {
+    tracing::debug!("resolve_server: looking up label={}", label);
 
-    // Try Redis cache first
+    // Try Redis cache first (keyed by the full <workspace>--<server> label).
     let cache_start = Instant::now();
-    if let Some(cached) = state.redis_cache.get_server(slug).await {
-        tracing::debug!("resolve_server: cache HIT for slug={} (took {:?})", slug, cache_start.elapsed());
+    if let Some(cached) = state.redis_cache.get_server(label).await {
+        tracing::debug!("resolve_server: cache HIT for label={} (took {:?})", label, cache_start.elapsed());
         return Ok(cached);
     }
-    tracing::debug!("resolve_server: cache MISS for slug={} (took {:?})", slug, cache_start.elapsed());
+    tracing::debug!("resolve_server: cache MISS for label={} (took {:?})", label, cache_start.elapsed());
+
+    // Split on the first `--`. New slugs forbid consecutive hyphens, so the first `--`
+    // is unambiguously the workspace/server separator.
+    let (workspace_slug, server_slug) = label.split_once("--").ok_or_else(|| {
+        tracing::warn!("resolve_server: host label '{}' is not <workspace>--<server>", label);
+        ProxyError::NotFound("Server not found".into())
+    })?;
 
     // Cache miss - query database
     let db_start = Instant::now();
-    tracing::debug!("resolve_server: querying database for slug={}", slug);
-    let server = ServerRepository::find_by_endpoint_slug(&state.db, slug)
+    tracing::debug!("resolve_server: querying database for workspace={} server={}", workspace_slug, server_slug);
+    let server = ServerRepository::find_by_workspace_and_server_slug(&state.db, workspace_slug, server_slug)
         .await
         .map_err(|e| {
-            tracing::error!("resolve_server: database error for slug={} (took {:?}): {}", slug, db_start.elapsed(), e);
+            tracing::error!("resolve_server: database error for label={} (took {:?}): {}", label, db_start.elapsed(), e);
             ProxyError::Internal(e.to_string())
         })?
         .ok_or_else(|| {
-            tracing::warn!("resolve_server: server NOT found for slug={} (took {:?})", slug, db_start.elapsed());
+            tracing::warn!("resolve_server: server NOT found for label={} (took {:?})", label, db_start.elapsed());
             ProxyError::NotFound("Server not found".into())
         })?;
 
-    tracing::info!("resolve_server: found server id={} for slug={} (took {:?})", server.id, slug, db_start.elapsed());
+    tracing::info!("resolve_server: found server id={} for label={} (took {:?})", server.id, label, db_start.elapsed());
 
-    // Cache the result (async, don't block)
+    // Cache the result (async, don't block), keyed by the full label.
     let redis_cache = state.redis_cache.clone();
     let server_clone = server.clone();
-    let slug_owned = slug.to_string();
+    let label_owned = label.to_string();
     tokio::spawn(async move {
-        redis_cache.set_server(&slug_owned, &server_clone).await;
+        redis_cache.set_server(&label_owned, &server_clone).await;
     });
 
     Ok(CachedServer::from(&server))
