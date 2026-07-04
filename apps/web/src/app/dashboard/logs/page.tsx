@@ -242,8 +242,8 @@ export default function LogsPage() {
       {/* Timeline scrubber */}
       {timeRange && (
         <div className="mb-6 px-4">
-          <div className="relative h-6">
-            <div className="absolute inset-x-0 top-1/2 h-px bg-gray-200" />
+          <div className="relative h-8">
+            <div className="absolute inset-x-0 bottom-0 h-px bg-gray-200" />
             <div className="absolute left-0 top-0 text-xs text-gray-400">
               {new Date(timeRange.min).toLocaleTimeString()}
             </div>

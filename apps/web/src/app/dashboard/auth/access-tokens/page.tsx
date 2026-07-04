@@ -240,13 +240,13 @@ function AccessTokenRow({
         <div className="flex items-center gap-2 mt-0.5">
           <code className="text-xs text-gray-400 font-mono">{token.key_prefix}...</code>
           <span className="text-gray-300">•</span>
-          <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded">
+          <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded">
             {serverName || t('create.allServers')}
           </span>
           <span className="text-gray-300">•</span>
           <div className="flex items-center gap-1">
             {token.scopes?.includes('*') ? (
-              <span className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 border border-violet-300 rounded">
+              <span className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded">
                 {t('scopes.fullAccess')}
               </span>
             ) : (

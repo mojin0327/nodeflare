@@ -9,16 +9,16 @@ import { Workspace, getApiErrorCode, getApiErrorMessage } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 
 const PLAN_BADGE_CLASSES: Record<string, string> = {
-  free: 'bg-gray-100 text-gray-600 border-gray-200',
-  pro: 'bg-violet-100 text-violet-700 border-violet-200',
-  team: 'bg-blue-100 text-blue-700 border-blue-200',
-  enterprise: 'bg-amber-100 text-amber-700 border-amber-200',
+  free: 'bg-gray-100 text-gray-600',
+  pro: 'bg-violet-100 text-violet-700',
+  team: 'bg-blue-100 text-blue-700',
+  enterprise: 'bg-amber-100 text-amber-700',
 };
 
 function PlanBadge({ plan, t }: { plan: string; t: (key: string) => string }) {
   const cls = PLAN_BADGE_CLASSES[plan] ?? PLAN_BADGE_CLASSES.free;
   return (
-    <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${cls}`}>
+    <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${cls}`}>
       {t(`plan.${plan}`)}
     </span>
   );
@@ -240,8 +240,8 @@ function CreateTeamDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-md mx-0 sm:mx-4 bg-white rounded-t-xl sm:rounded-xl border border-gray-200 shadow-2xl">
+      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
+      <div className="relative w-full max-w-md mx-0 sm:mx-4 bg-white rounded-t-lg sm:rounded-lg border border-gray-200 shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-700">{t('createTeamTitle')}</h2>
           <button
@@ -291,7 +291,7 @@ function CreateTeamDialog({
             )}
           </div>
 
-          <div className="flex justify-end gap-2 px-5 py-4 bg-gray-50 border-t border-gray-200 rounded-b-xl">
+          <div className="flex justify-end gap-2 px-5 py-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
             <button
               type="button"
               onClick={onClose}

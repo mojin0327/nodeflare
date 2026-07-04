@@ -206,8 +206,8 @@ function AddMemberForm({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-lg mx-0 sm:mx-4 bg-white rounded-t-xl sm:rounded-xl border border-gray-200 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
+      <div className="relative w-full max-w-lg mx-0 sm:mx-4 bg-white rounded-t-lg sm:rounded-lg border border-gray-200 shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-500">{t('add.title')}</h2>
@@ -274,7 +274,7 @@ function AddMemberForm({
           </div>
 
           {/* Footer */}
-          <div className="flex justify-end gap-2 px-5 py-4 bg-gray-50 border-t border-gray-200 rounded-b-xl">
+          <div className="flex justify-end gap-2 px-5 py-4 bg-gray-50 border-t border-gray-200 rounded-b-lg">
             <button
               type="button"
               onClick={onClose}
