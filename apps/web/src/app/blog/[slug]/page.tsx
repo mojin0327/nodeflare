@@ -162,9 +162,8 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           {/* Mobile */}
           <div className="sm:hidden rounded-xl overflow-hidden border border-gray-300 bg-slate-100">
             <div className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <img src="/logo.png" alt="nodeflare" className="w-8 h-8 rounded" />
-                <span className="font-black text-gray-900 text-lg">NodeFlare</span>
+              <div className="mb-1">
+                <img src="/logo2.png" alt="NodeFlare" className="h-7 w-auto" />
               </div>
               <p className="text-sm font-extrabold text-gray-800 !m-0 !leading-normal">
                 {locale === 'ja' ? 'MCP専用ホスティングサービス' : 'MCP Hosting Service'}
@@ -187,11 +186,18 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             className="hidden sm:block relative rounded-xl overflow-hidden py-3 px-6 border border-gray-300"
             style={{ background: 'linear-gradient(115deg, #f1f5f9 50%, #6d28d9 50%)' }}
           >
-            <div className="flex items-center justify-between">
+            {/* Security illustration in the purple region */}
+            <img
+              src="/secret_management.png"
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-[52%] -translate-y-1/2 h-[150%] w-auto object-contain mix-blend-screen"
+            />
+
+            <div className="relative flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <img src="/logo.png" alt="nodeflare" className="w-9 h-9 rounded" />
-                  <span className="font-black text-gray-900 text-xl">NodeFlare</span>
+                <div className="mb-0.5">
+                  <img src="/logo2.png" alt="NodeFlare" className="h-8 w-auto" />
                 </div>
                 <p className="text-[17px] font-extrabold text-gray-800 !m-0 !leading-normal">
                   {locale === 'ja' ? 'MCP専用ホスティングサービス' : 'MCP Hosting Service'}
