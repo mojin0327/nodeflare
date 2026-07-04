@@ -412,14 +412,14 @@ export default function NewServerPage() {
                   setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
                 }
               }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
                 sourceType === 'my-repos'
-                  ? 'bg-gray-100 border-gray-300'
-                  : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  ? 'bg-gray-100'
+                  : 'bg-white hover:bg-gray-50'
               }`}
             >
               <SiGithub className="w-4 h-4 text-[#323232]" />
-              <span className="font-semibold text-sm text-[#323232]">
+              <span className="font-medium text-sm text-[#323232]">
                 {t('create.myRepos')}
               </span>
             </button>
@@ -430,14 +430,14 @@ export default function NewServerPage() {
                 setSelectedRepo(null);
                 setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
               }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
                 sourceType === 'public-url'
-                  ? 'bg-gray-100 border-gray-300'
-                  : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  ? 'bg-gray-100'
+                  : 'bg-white hover:bg-gray-50'
               }`}
             >
               <Link className="w-4 h-4 text-[#323232]" />
-              <span className="font-semibold text-sm text-[#323232]">
+              <span className="font-medium text-sm text-[#323232]">
                 {t('create.publicUrl')}
               </span>
             </button>
@@ -563,7 +563,7 @@ export default function NewServerPage() {
           ) : (
             // Public URL Input
             <div className="space-y-3">
-              <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-input bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-100 transition-all">
+              <div className="flex items-center gap-3 px-4 py-2 rounded-xl border border-input bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-100 transition-all">
                 <SiGithub className="w-5 h-5 text-gray-400 flex-shrink-0" />
                 <input
                   type="text"

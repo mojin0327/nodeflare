@@ -40,7 +40,7 @@ export function MemorySelect({ value, onChange, maxMemoryMb, id = 'memory_mb' }:
           id={id}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="peer w-full appearance-none rounded-lg pr-9"
+          className="peer w-full appearance-none rounded-[10px] pr-9"
         >
           {MEMORY_LADDER_MB.map((mb) => {
             const locked = mb > maxMemoryMb;
