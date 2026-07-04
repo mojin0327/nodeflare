@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { BuildLogsPanel } from '@/components/deployment/build-logs-panel';
 import { MemorySelect } from '@/components/servers/memory-select';
+import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import { DEFAULT_MEMORY_MB } from '@/lib/plans';
 import {
   AlertDialog,
@@ -337,8 +338,8 @@ export default function ServerDetailPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="flex items-center justify-center flex-shrink-0">
-            <Boxes className="w-9 h-9 sm:w-11 sm:h-11 text-[#323232]" />
+          <div className="flex-shrink-0">
+            <JazzAvatar seed={server.id} diameter={44} />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">

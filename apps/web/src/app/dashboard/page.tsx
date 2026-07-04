@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
 import { McpServerBasic } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
-import { PatternAvatar } from '@/components/ui/pattern-avatar';
+import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -272,11 +272,7 @@ function ServerStatusRow({
       className="group flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
     >
       <div className="relative w-8 h-8 flex-shrink-0">
-        <PatternAvatar
-          seed={server.id}
-          rounded="rounded-md"
-          className="w-8 h-8"
-        />
+        <JazzAvatar seed={server.id} diameter={32} />
         {server.status === 'running' && (
           <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white ${pulse ? 'animate-ping' : ''}`} />
         )}

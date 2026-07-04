@@ -7,7 +7,7 @@ import { Check, ChevronsUpDown, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Workspace, getApiErrorCode, getApiErrorMessage } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
-import { PatternAvatar } from '@/components/ui/pattern-avatar';
+import Avatar from 'boring-avatars';
 
 const PLAN_BADGE_CLASSES: Record<string, string> = {
   free: 'bg-gray-100 text-gray-600',
@@ -25,7 +25,7 @@ function PlanBadge({ plan, t }: { plan: string; t: (key: string) => string }) {
   );
 }
 
-// Round, procedural pixel-grid identicon per workspace (pattern from the id).
+// Round, Boring Avatars identicon per workspace (generated from the id).
 function WorkspaceAvatar({
   name,
   seed,
@@ -37,15 +37,16 @@ function WorkspaceAvatar({
   size?: 'md' | 'lg';
   active?: boolean;
 }) {
-  const dim = size === 'lg' ? 'h-8 w-8' : 'h-6 w-6';
+  const px = size === 'lg' ? 32 : 24;
   return (
-    <PatternAvatar
-      seed={seed || name}
-      variant="geo"
-      className={`${dim} shadow-sm ring-1 ring-black/5 ${
+    <span
+      className={`relative inline-flex shrink-0 overflow-hidden rounded-full shadow-sm ring-1 ring-black/5 ${
         active ? 'ring-2 ring-offset-1 ring-violet-400/70' : ''
       }`}
-    />
+      style={{ width: px, height: px }}
+    >
+      <Avatar size={px} name={seed || name} variant="bauhaus" />
+    </span>
   );
 }
 
