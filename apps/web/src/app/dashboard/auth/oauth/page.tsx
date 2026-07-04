@@ -208,13 +208,13 @@ function OAuthAppRow({
         <div className="flex items-center gap-2 mt-0.5">
           <code className="text-xs text-gray-400 font-mono">{app.client_id.slice(0, 16)}...</code>
           <span className="text-gray-300">•</span>
-          <span className="px-2 py-0.5 text-xs bg-violet-50 text-violet-600 border border-violet-200 rounded">
+          <span className="px-2 py-0.5 text-xs bg-violet-50 text-violet-600 rounded">
             {serverName || t('create.allServers')}
           </span>
           <span className="text-gray-300">•</span>
           <div className="flex items-center gap-1">
             {app.scopes?.includes('*') ? (
-              <span className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 border border-violet-300 rounded">
+              <span className="px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 rounded">
                 {t('scopes.fullAccess')}
               </span>
             ) : (

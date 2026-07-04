@@ -401,7 +401,7 @@ export default function NewServerPage() {
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.githubRepo')}</h2>
 
           {/* Source Type Cards */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="flex flex-wrap gap-3 mb-4">
             <button
               type="button"
               onClick={() => {
@@ -412,28 +412,16 @@ export default function NewServerPage() {
                   setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
                 }
               }}
-              className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors ${
                 sourceType === 'my-repos'
-                  ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                  : 'bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  ? 'bg-gray-100 border-gray-300'
+                  : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
               }`}
             >
-              <div className="flex items-center justify-center flex-shrink-0">
-                <SiGithub className={`w-6 h-6 ${sourceType === 'my-repos' ? 'text-violet-600' : 'text-gray-400'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="block font-semibold text-sm text-[#323232]">
-                  {t('create.myRepos')}
-                </span>
-                <span className={`block text-xs mt-0.5 ${sourceType === 'my-repos' ? 'text-violet-600' : 'text-gray-500'}`}>
-                  {t('create.myReposDesc')}
-                </span>
-              </div>
-              {sourceType === 'my-repos' && (
-                <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                </div>
-              )}
+              <SiGithub className="w-4 h-4 text-[#323232]" />
+              <span className="font-semibold text-sm text-[#323232]">
+                {t('create.myRepos')}
+              </span>
             </button>
             <button
               type="button"
@@ -442,28 +430,16 @@ export default function NewServerPage() {
                 setSelectedRepo(null);
                 setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
               }}
-              className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-colors ${
                 sourceType === 'public-url'
-                  ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                  : 'bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  ? 'bg-gray-100 border-gray-300'
+                  : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
               }`}
             >
-              <div className="flex items-center justify-center flex-shrink-0">
-                <Link className={`w-6 h-6 ${sourceType === 'public-url' ? 'text-violet-600' : 'text-gray-400'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="block font-semibold text-sm text-[#323232]">
-                  {t('create.publicUrl')}
-                </span>
-                <span className={`block text-xs mt-0.5 ${sourceType === 'public-url' ? 'text-violet-600' : 'text-gray-500'}`}>
-                  {t('create.publicUrlDesc')}
-                </span>
-              </div>
-              {sourceType === 'public-url' && (
-                <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                </div>
-              )}
+              <Link className="w-4 h-4 text-[#323232]" />
+              <span className="font-semibold text-sm text-[#323232]">
+                {t('create.publicUrl')}
+              </span>
             </button>
           </div>
 
