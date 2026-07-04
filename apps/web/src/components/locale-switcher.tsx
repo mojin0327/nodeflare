@@ -4,10 +4,20 @@ import { useState, useRef, useEffect } from 'react';
 import { useLocale } from 'next-intl';
 import { locales, localeNames, Locale } from '@/i18n/config';
 
-const localeFlags: Record<Locale, string> = {
-  ja: '🇯🇵',
-  en: '🇺🇸',
+const localeCountry: Record<Locale, string> = {
+  ja: 'jp',
+  en: 'us',
 };
+
+function Flag({ locale, className = '' }: { locale: Locale; className?: string }) {
+  // flag-icons: `.fi` sizes off font-size (width 1.333em, height 1em)
+  return (
+    <span
+      className={`fi fi-${localeCountry[locale]} shrink-0 rounded-[3px] leading-none ${className}`}
+      aria-hidden="true"
+    />
+  );
+}
 
 export function LocaleSwitcher() {
   const locale = useLocale() as Locale;
@@ -34,23 +44,10 @@ export function LocaleSwitcher() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
         aria-label="言語を選択"
       >
-        <svg
-          className="w-5 h-5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <path d="M2 12h20" />
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-        </svg>
-        <span className="hidden sm:inline">{localeFlags[locale]} {localeNames[locale]}</span>
+        <Flag locale={locale} className="text-[19px]" />
         <svg
           className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
           viewBox="0 0 24 24"
@@ -65,7 +62,7 @@ export function LocaleSwitcher() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
           {locales.map((loc) => (
             <button
               key={loc}
@@ -76,7 +73,7 @@ export function LocaleSwitcher() {
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
-              <span className="text-lg">{localeFlags[loc]}</span>
+              <Flag locale={loc} className="text-lg" />
               <span>{localeNames[loc]}</span>
               {locale === loc && (
                 <svg

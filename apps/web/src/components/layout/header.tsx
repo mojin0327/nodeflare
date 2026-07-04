@@ -34,7 +34,7 @@ export function Header() {
             <a href="https://x.com/3vvqu2dhUn36840" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
               <FaXTwitter className="w-5 h-5" />
             </a>
-            <a href="https://github.com/nodeflare-dev" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
+            <a href="https://github.com/nodeflare-dev/nodeflare" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
               <FaGithub className="w-5 h-5" />
             </a>
           </div>
@@ -110,7 +110,7 @@ export function Header() {
               <a href="https://x.com/3vvqu2dhUn36840" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
                 <FaXTwitter className="w-5 h-5" />
               </a>
-              <a href="https://github.com/nodeflare-dev" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
+              <a href="https://github.com/nodeflare-dev/nodeflare" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-900 transition-colors">
                 <FaGithub className="w-5 h-5" />
               </a>
             </div>
