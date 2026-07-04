@@ -45,7 +45,7 @@ function WorkspaceAvatar({
       }`}
       style={{ width: px, height: px }}
     >
-      <Avatar size={px} name={seed || name} variant="marble" />
+      <Avatar size={px} name={seed || name} variant="beam" />
     </span>
   );
 }
