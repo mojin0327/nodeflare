@@ -974,9 +974,9 @@ function TestTab({
 
       {/* Tool Modal - rendered via Portal to avoid stacking context issues */}
       {mounted && selectedTool && selectedToolData && createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80" onClick={() => setSelectedTool(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={() => setSelectedTool(null)}>
           <div
-            className="w-full max-w-lg bg-white rounded-lg shadow-xl overflow-hidden"
+            className="w-full max-w-lg bg-white rounded-xl shadow-xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

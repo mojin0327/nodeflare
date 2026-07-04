@@ -240,8 +240,8 @@ export default function VPNPage() {
 
       {/* Delete Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-5 max-w-xs w-full mx-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 max-w-xs w-full mx-4">
             <p className="text-sm text-gray-700 mb-4">
               {t('deleteConfirmMessage', { name: deleteTarget })}
             </p>
