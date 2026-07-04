@@ -20,6 +20,29 @@ import { useSetPageHeader } from '../../page-header';
 
 type SourceType = 'my-repos' | 'public-url';
 
+/** Stable React Query key for a repo-inspect target. */
+const inspectKey = (repo: string, branch?: string, subdir?: string) =>
+  ['inspect', repo, branch ?? '', subdir ?? ''] as const;
+
+/** Fetcher for the inspect cache. Omits an empty branch so the backend resolves default. */
+const inspectFn = (
+  repo: string,
+  branch?: string,
+  subdir?: string,
+  accountId?: string,
+): Promise<RepoDetection> =>
+  inspectRepo({
+    github_repo: repo,
+    github_branch: branch || undefined,
+    account_id: accountId || undefined,
+    root_directory: subdir,
+  });
+
+/** Subtle shimmer placeholder shown in place of a value while detection is in flight. */
+function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-gray-100 ${className}`} />;
+}
+
 export default function NewServerPage() {
   const t = useTranslations('servers');
   const tCommon = useTranslations('common');
@@ -143,27 +166,69 @@ export default function NewServerPage() {
     }
   }, []);
 
-  const inspectMutation = useMutation({
-    mutationFn: inspectRepo,
-    onSuccess: applyDetection,
-  });
-  // `mutate` is stable across renders; capture it so callbacks don't depend on the
-  // whole mutation object.
-  const inspectMutate = inspectMutation.mutate;
+  // Auto-detect runs through a React Query CACHE keyed by the target, so hover-prefetch,
+  // request dedup, and staleTime all come for free. `detectTarget` is the currently-selected
+  // repo/branch/subdir; setting it drives the active `detectQuery` below.
+  const [detectTarget, setDetectTarget] = useState<{
+    repo: string;
+    branch?: string;
+    subdir?: string;
+  } | null>(null);
 
+  const detectQuery = useQuery<RepoDetection>({
+    queryKey: detectTarget
+      ? inspectKey(detectTarget.repo, detectTarget.branch, detectTarget.subdir)
+      : ['inspect', 'idle'],
+    queryFn: () =>
+      inspectFn(
+        detectTarget!.repo,
+        detectTarget!.branch,
+        detectTarget!.subdir,
+        selectedAccountId || undefined,
+      ),
+    enabled: !!detectTarget,
+    staleTime: 5 * 60_000,
+  });
+
+  // Apply each new detection result exactly once. React Query hands back a stable `data`
+  // reference per result, so guarding on object identity re-applies when a *new* result
+  // arrives (e.g. after switching repos) but never double-applies on re-render.
+  const appliedRef = useRef<RepoDetection | null>(null);
+  useEffect(() => {
+    const data = detectQuery.data;
+    if (data && appliedRef.current !== data) {
+      appliedRef.current = data;
+      applyDetection(data);
+    }
+  }, [detectQuery.data, applyDetection]);
+
+  // Warm the inspect cache ahead of selection (repo hover/focus, URL paste). Dedup is
+  // automatic — React Query won't refire an in-flight or still-fresh key.
+  const prefetchDetect = useCallback(
+    (repo: string, branch?: string, subdir?: string) => {
+      if (!repo) return;
+      queryClient.prefetchQuery({
+        queryKey: inspectKey(repo, branch, subdir),
+        queryFn: () => inspectFn(repo, branch, subdir, selectedAccountId || undefined),
+        staleTime: 5 * 60_000,
+      });
+    },
+    [queryClient, selectedAccountId],
+  );
+
+  // Selecting a target just points `detectTarget` at it; the useQuery (warmed by prefetch)
+  // does the rest, so a click after hover is an instant cache hit.
   const runDetect = useCallback(
     (repo: string, branch: string | undefined, subdir?: string) => {
       if (!repo) return;
-      inspectMutate({
-        github_repo: repo,
-        // Omit the branch when unknown so the backend resolves the repo's default branch.
-        github_branch: branch || undefined,
-        account_id: selectedAccountId || undefined,
-        root_directory: subdir,
-      });
+      setDetectTarget({ repo, branch: branch || undefined, subdir });
     },
-    [inspectMutate, selectedAccountId]
+    [],
   );
+
+  // True while the active target's detection is actually in flight (false on a warm cache
+  // hit); drives the skeletons so detected values slot in instead of popping.
+  const detecting = !!detectTarget && detectQuery.isFetching;
 
   const generateSlug = useCallback((name: string) => {
     return name
@@ -229,6 +294,10 @@ export default function NewServerPage() {
         github_branch: parsed.branch || '',
         root_directory: parsed.subdir || '',
       }));
+      // Kick off the fetch ASAP — warm the cache the moment we have a valid repo so the
+      // network round-trip overlaps with the user finishing their paste, independent of
+      // the debounce below (which still gates when we actually set the active target).
+      prefetchDetect(`${parsed.owner}/${parsed.repo}`, parsed.branch, parsed.subdir);
       // Debounce auto-detection while the user is still typing/pasting the URL.
       if (detectTimer.current) clearTimeout(detectTimer.current);
       detectTimer.current = setTimeout(() => {
@@ -238,7 +307,7 @@ export default function NewServerPage() {
       setPublicRepoError('Invalid format. Use owner/repo or full GitHub URL');
       setFormData(prev => ({ ...prev, github_repo: '', name: '', slug: '' }));
     }
-  }, [parseGitHubUrl, generateSlug, runDetect]);
+  }, [parseGitHubUrl, generateSlug, runDetect, prefetchDetect]);
 
   const handleSelectRepo = (repo: GitHubRepo) => {
     setSelectedRepo(repo);
@@ -486,6 +555,9 @@ export default function NewServerPage() {
                         key={repo.id}
                         type="button"
                         onClick={() => handleSelectRepo(repo)}
+                        // Warm the inspect cache on hover/focus so the click is instant.
+                        onMouseEnter={() => prefetchDetect(repo.full_name, repo.default_branch, undefined)}
+                        onFocus={() => prefetchDetect(repo.full_name, repo.default_branch, undefined)}
                         className="w-full flex items-center gap-3 p-3 hover:bg-violet-50 transition-colors text-left border-b border-gray-50 last:border-b-0"
                       >
                         <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -543,7 +615,7 @@ export default function NewServerPage() {
         <section>
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.configuration')}</h2>
 
-          {inspectMutation.isPending && (
+          {detecting && (
             <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-violet-50 border border-violet-100 text-violet-700">
               <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
               <span className="text-sm font-medium">{t('create.detecting')}</span>
@@ -608,6 +680,13 @@ export default function NewServerPage() {
 
                 <div>
                   <Label className="text-gray-700">{t('create.runtime')}</Label>
+                  {detecting ? (
+                    <div className="grid grid-cols-5 gap-3 mt-2">
+                      {runtimes.map((r) => (
+                        <Skeleton key={r.value} className="h-[86px]" />
+                      ))}
+                    </div>
+                  ) : (
                   <div className="grid grid-cols-5 gap-3 mt-2">
                     {runtimes.map((runtime) => {
                       const isSelected = formData.runtime === runtime.value;
@@ -630,10 +709,17 @@ export default function NewServerPage() {
                       );
                     })}
                   </div>
+                  )}
                 </div>
 
                 <div>
                   <Label className="text-gray-700">{t('create.transport')}</Label>
+                  {detecting ? (
+                    <div className="grid grid-cols-2 gap-3 mt-2">
+                      <Skeleton className="h-[76px]" />
+                      <Skeleton className="h-[76px]" />
+                    </div>
+                  ) : (
                   <div className="grid grid-cols-2 gap-3 mt-2">
                     <button
                       type="button"
@@ -684,6 +770,7 @@ export default function NewServerPage() {
                       )}
                     </button>
                   </div>
+                  )}
                 </div>
 
                 <div>
@@ -729,6 +816,9 @@ export default function NewServerPage() {
                   <div>
                     <Label htmlFor="port" className="text-gray-700">{t('create.port')}</Label>
                     <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.portHelp')}</p>
+                    {detecting ? (
+                    <Skeleton className="h-[38px]" />
+                    ) : (
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
                       <Server className="w-4 h-4 text-gray-400" />
                       <input
@@ -745,12 +835,16 @@ export default function NewServerPage() {
                         className="flex-1 bg-transparent text-sm focus:outline-none"
                       />
                     </div>
+                    )}
                   </div>
                 )}
 
                 <div>
                   <Label htmlFor="entry_command" className="text-gray-700">{t('create.entryCommand')}</Label>
                   <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.entryCommandHelp')}</p>
+                  {detecting ? (
+                  <Skeleton className="h-[38px]" />
+                  ) : (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
                     <Terminal className="w-4 h-4 text-gray-400" />
                     <input
@@ -762,11 +856,15 @@ export default function NewServerPage() {
                       className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
                     />
                   </div>
+                  )}
                 </div>
 
                 <div>
                   <Label htmlFor="build_command" className="text-gray-700">{t('create.buildCommand')}</Label>
                   <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.buildCommandHelp')}</p>
+                  {detecting ? (
+                  <Skeleton className="h-[38px]" />
+                  ) : (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
                     <Terminal className="w-4 h-4 text-gray-400" />
                     <input
@@ -778,6 +876,7 @@ export default function NewServerPage() {
                       className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
                     />
                   </div>
+                  )}
                 </div>
                 </div>
                 )}
@@ -826,6 +925,19 @@ export default function NewServerPage() {
                 <div className="pt-4 border-t border-gray-100">
                   <Label className="text-gray-700">{t('create.envVars')}</Label>
                   <p className="text-xs text-gray-500 mt-1 mb-3">{t('create.envVarsHelp')}</p>
+
+                  {detecting && envVars.length === 0 && (
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-[38px] w-1/3" />
+                        <Skeleton className="h-[38px] flex-1" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-[38px] w-1/3" />
+                        <Skeleton className="h-[38px] flex-1" />
+                      </div>
+                    </div>
+                  )}
 
                   {envVars.length > 0 && (
                     <div className="space-y-2 mb-3">
