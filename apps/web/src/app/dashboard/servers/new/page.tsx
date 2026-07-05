@@ -138,8 +138,10 @@ export default function NewServerPage() {
   // Auto-detect deploy config from the repo (Vercel-style): silently pre-fill the fields
   // below with the same values the builder will use. Every field stays editable.
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Detected deploy settings are folded away (Vercel-style); env vars stay visible.
+  // Detected deploy settings and env vars are each folded away (Vercel-style) into their
+  // own collapsible card below the Visibility section.
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [envOpen, setEnvOpen] = useState(false);
 
   const applyDetection = useCallback((d: RepoDetection) => {
     setFormData((prev) => ({
@@ -623,7 +625,7 @@ export default function NewServerPage() {
 
           <div className="space-y-4">
             <div>
-              <Label htmlFor="name" className="text-gray-700">{t('create.name')}</Label>
+              <Label htmlFor="name" className="text-xs">{t('create.name')}</Label>
               <Input
                 id="name"
                 placeholder={t('create.namePlaceholder')}
@@ -638,7 +640,7 @@ export default function NewServerPage() {
             </div>
 
             <div>
-              <Label htmlFor="description" className="text-gray-700">{t('create.description')}</Label>
+              <Label htmlFor="description" className="text-xs">{t('create.description')}</Label>
               <Input
                 id="description"
                 placeholder={t('create.descriptionBrief')}
@@ -655,6 +657,7 @@ export default function NewServerPage() {
                   value={formData.memory_mb ?? DEFAULT_MEMORY_MB}
                   onChange={(mb) => setFormData((prev) => ({ ...prev, memory_mb: mb }))}
                   maxMemoryMb={maxMemoryMb}
+                  labelClassName="text-xs"
                 />
 
                 {/* Auth Enabled Toggle */}
@@ -674,7 +677,7 @@ export default function NewServerPage() {
                       />
                     </button>
                     <div className="flex-1">
-                      <Label className="text-gray-700 cursor-pointer" onClick={() => setFormData(prev => ({ ...prev, auth_enabled: !prev.auth_enabled }))}>
+                      <Label className="text-xs cursor-pointer" onClick={() => setFormData(prev => ({ ...prev, auth_enabled: !prev.auth_enabled }))}>
                         {t('create.authEnabled')}
                       </Label>
                       {!formData.auth_enabled && (
@@ -687,80 +690,6 @@ export default function NewServerPage() {
                       )}
                     </div>
                   </div>
-                </div>
-
-                {/* Environment Variables */}
-                <div className="pt-4 border-t border-gray-100">
-                  <Label className="text-gray-700">{t('create.envVars')}</Label>
-
-                  {detecting && envVars.length === 0 && (
-                    <div className="space-y-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-[38px] w-1/3" />
-                        <Skeleton className="h-[38px] flex-1" />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-[38px] w-1/3" />
-                        <Skeleton className="h-[38px] flex-1" />
-                      </div>
-                    </div>
-                  )}
-
-                  {detecting && envVars.length === 0 && (
-                    <div className="space-y-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-[38px] w-1/3" />
-                        <Skeleton className="h-[38px] flex-1" />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-[38px] w-1/3" />
-                        <Skeleton className="h-[38px] flex-1" />
-                      </div>
-                    </div>
-                  )}
-
-                  {envVars.length > 0 && (
-                    <div className="space-y-2 mb-3">
-                      {envVars.map((env, index) => (
-                        <div key={index} className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white w-1/3">
-                            <KeyRound className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            <input
-                              type="text"
-                              value={env.key}
-                              onChange={(e) => updateEnvVar(index, 'key', e.target.value)}
-                              placeholder="API_KEY"
-                              className="flex-1 min-w-0 bg-transparent text-sm font-mono focus:outline-none"
-                            />
-                          </div>
-                          <input
-                            type="password"
-                            value={env.value}
-                            onChange={(e) => updateEnvVar(index, 'value', e.target.value)}
-                            placeholder={t('create.envVarsValuePlaceholder')}
-                            className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeEnvVar(index)}
-                            className="p-2 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0"
-                            title={tCommon('delete')}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={addEnvVar}
-                    className="flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" />
-                    {t('create.envVarsAdd')}
-                  </button>
                 </div>
               </div>
           </div>
@@ -811,20 +740,94 @@ export default function NewServerPage() {
           </div>
         </section>
 
+        {/* Environment Variables */}
+        <section>
+          <div className="rounded-[10px] border border-input">
+            <button
+              type="button"
+              onClick={() => setEnvOpen((o) => !o)}
+              className="flex w-full items-center gap-1.5 p-4 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform ${envOpen ? 'rotate-90' : ''}`} />
+              {t('create.envVars')}
+            </button>
+            {envOpen && (
+            <div className="space-y-4 border-t border-input p-4">
+              {detecting && envVars.length === 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-[38px] w-1/3" />
+                    <Skeleton className="h-[38px] flex-1" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-[38px] w-1/3" />
+                    <Skeleton className="h-[38px] flex-1" />
+                  </div>
+                </div>
+              )}
+
+              {envVars.length > 0 && (
+                <div className="space-y-2">
+                  {envVars.map((env, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white w-1/3">
+                        <KeyRound className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <input
+                          type="text"
+                          value={env.key}
+                          onChange={(e) => updateEnvVar(index, 'key', e.target.value)}
+                          placeholder="API_KEY"
+                          className="flex-1 min-w-0 bg-transparent text-sm font-mono focus:outline-none"
+                        />
+                      </div>
+                      <input
+                        type="password"
+                        value={env.value}
+                        onChange={(e) => updateEnvVar(index, 'value', e.target.value)}
+                        placeholder={t('create.envVarsValuePlaceholder')}
+                        className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeEnvVar(index)}
+                        className="p-2 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0"
+                        title={tCommon('delete')}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={addEnvVar}
+                className="flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                {t('create.envVarsAdd')}
+              </button>
+            </div>
+            )}
+          </div>
+        </section>
+
         {/* Build & deploy settings */}
         <section>
+          <div className="rounded-[10px] border border-input">
             <button
               type="button"
               onClick={() => setAdvancedOpen((o) => !o)}
-              className="flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex w-full items-center gap-1.5 p-4 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ChevronRight className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
               {t('create.advancedSettings')}
             </button>
                 {advancedOpen && (
-                <div className="mt-3 space-y-4 rounded-[10px] border border-input p-4">
+                <div className="space-y-4 border-t border-input p-4">
                 <div>
-                  <Label htmlFor="github_branch" className="text-gray-700">{t('create.branch')}</Label>
+                  <Label htmlFor="github_branch" className="text-xs">{t('create.branch')}</Label>
                   <div className="relative mt-2 w-full sm:w-56">
                     <GitBranch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <select
@@ -845,7 +848,7 @@ export default function NewServerPage() {
                 </div>
 
                 <div>
-                  <Label className="text-gray-700">{t('create.runtime')}</Label>
+                  <Label className="text-xs">{t('create.runtime')}</Label>
                   {detecting ? (
                     <div className="grid grid-cols-5 gap-3 mt-2">
                       {runtimes.map((r) => (
@@ -879,7 +882,7 @@ export default function NewServerPage() {
                 </div>
 
                 <div>
-                  <Label className="text-gray-700">{t('create.transport')}</Label>
+                  <Label className="text-xs">{t('create.transport')}</Label>
                   {detecting ? (
                     <div className="flex flex-wrap gap-3 mt-2">
                       <Skeleton className="h-[42px] w-44" />
@@ -912,7 +915,7 @@ export default function NewServerPage() {
                 </div>
 
                 <div>
-                  <Label htmlFor="root_directory" className="text-gray-700">{t('create.rootDirectory')}</Label>
+                  <Label htmlFor="root_directory" className="text-xs">{t('create.rootDirectory')}</Label>
                   <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
                     <Folder className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <input
@@ -927,7 +930,7 @@ export default function NewServerPage() {
                 </div>
 
                 <div>
-                  <Label htmlFor="mcp_path" className="text-gray-700">{t('create.mcpPath')}</Label>
+                  <Label htmlFor="mcp_path" className="text-xs">{t('create.mcpPath')}</Label>
                   <div className={`mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input px-3 transition-colors ${
                     formData.transport === 'stdio' ? 'bg-gray-100 cursor-not-allowed' : 'bg-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2'
                   }`}>
@@ -948,7 +951,7 @@ export default function NewServerPage() {
 
                 {formData.transport === 'sse' && (
                   <div>
-                    <Label htmlFor="port" className="text-gray-700">{t('create.port')}</Label>
+                    <Label htmlFor="port" className="text-xs">{t('create.port')}</Label>
                     {detecting ? (
                     <Skeleton className="mt-2 h-10" />
                     ) : (
@@ -973,7 +976,7 @@ export default function NewServerPage() {
                 )}
 
                 <div>
-                  <Label htmlFor="entry_command" className="text-gray-700">{t('create.entryCommand')}</Label>
+                  <Label htmlFor="entry_command" className="text-xs">{t('create.entryCommand')}</Label>
                   {detecting ? (
                   <Skeleton className="mt-2 h-10" />
                   ) : (
@@ -992,7 +995,7 @@ export default function NewServerPage() {
                 </div>
 
                 <div>
-                  <Label htmlFor="build_command" className="text-gray-700">{t('create.buildCommand')}</Label>
+                  <Label htmlFor="build_command" className="text-xs">{t('create.buildCommand')}</Label>
                   {detecting ? (
                   <Skeleton className="mt-2 h-10" />
                   ) : (
@@ -1011,6 +1014,7 @@ export default function NewServerPage() {
                 </div>
                 </div>
                 )}
+          </div>
         </section>
 
         {/* Error Message */}

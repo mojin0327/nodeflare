@@ -19,6 +19,8 @@ interface MemorySelectProps {
   /** The plan's per-server memory ceiling (MB). Sizes above this are locked. */
   maxMemoryMb: number;
   id?: string;
+  /** Extra classes for the field label (e.g. to match a form's label sizing). */
+  labelClassName?: string;
 }
 
 /**
@@ -27,13 +29,13 @@ interface MemorySelectProps {
  * (a too-large choice is rejected with MEMORY_LIMIT_REACHED). When the plan caps
  * below the largest rung, an inline upgrade link is shown.
  */
-export function MemorySelect({ value, onChange, maxMemoryMb, id = 'memory_mb' }: MemorySelectProps) {
+export function MemorySelect({ value, onChange, maxMemoryMb, id = 'memory_mb', labelClassName }: MemorySelectProps) {
   const t = useTranslations('servers');
   const capped = maxMemoryMb < MEMORY_LADDER_MB[MEMORY_LADDER_MB.length - 1];
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{t('create.machineMemory')}</Label>
+      <Label htmlFor={id} className={labelClassName}>{t('create.machineMemory')}</Label>
       <div className="relative w-full sm:w-48">
         <Select
           id={id}
