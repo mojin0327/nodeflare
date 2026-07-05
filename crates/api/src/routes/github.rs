@@ -44,6 +44,19 @@ pub struct ReposQuery {
     pub account_id: Option<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubBranchResponse {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BranchesQuery {
+    /// `owner/repo` to list branches for.
+    pub repo: String,
+    /// Optional account ID whose OAuth token authenticates the GitHub call.
+    pub account_id: Option<Uuid>,
+}
+
 pub async fn list_repositories(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -123,4 +136,69 @@ pub async fn list_repositories(
         .collect();
 
     Ok(Json(result))
+}
+
+/// List a repository's branches (names only). Fetched lazily by the create form's branch
+/// dropdown when the user opens it, so it never blocks the initial render or auto-detection.
+/// Uses the caller's linked-account OAuth token, mirroring `list_repositories`.
+pub async fn list_branches(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(params): Query<BranchesQuery>,
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    // Expect `owner/repo`; anything else is a client bug, so fail loudly.
+    let (owner, repo) = match params.repo.split_once('/') {
+        Some((o, r)) if !o.is_empty() && !r.is_empty() && !r.contains('/') => (o, r),
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "repo must be in 'owner/repo' format".to_string(),
+            ))
+        }
+    };
+
+    // Resolve a GitHub token (specific account, else any linked one).
+    let linked_account = if let Some(account_id) = params.account_id {
+        LinkedGitHubAccountRepository::get_with_token(&state.db, account_id, auth_user.user_id)
+            .await
+            .map_err(db_error)?
+    } else {
+        LinkedGitHubAccountRepository::get_any_with_token(&state.db, auth_user.user_id)
+            .await
+            .map_err(db_error)?
+    };
+
+    // No linked account → nothing to authenticate with; return empty (not an error) so the
+    // dropdown just keeps its seeded default branch.
+    let linked_account = match linked_account {
+        Some(account) => account,
+        None => return Ok(Json(vec![])),
+    };
+
+    let access_token = state
+        .crypto
+        .decrypt_string(&linked_account.access_token_encrypted, &linked_account.access_token_nonce)
+        .map_err(|e| internal_error("Token decryption failed", e))?;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("https://api.github.com/repos/{}/{}/branches", owner, repo))
+        .query(&[("per_page", "100")])
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "MCP-Cloud/1.0")
+        .send()
+        .await
+        .map_err(db_error)?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        tracing::warn!("GitHub branches API error: {} - {}", status, body);
+        // Non-fatal: the form falls back to the seeded default branch.
+        return Ok(Json(vec![]));
+    }
+
+    let branches: Vec<GitHubBranchResponse> = response.json().await.map_err(db_error)?;
+    Ok(Json(branches.into_iter().map(|b| b.name).collect()))
 }

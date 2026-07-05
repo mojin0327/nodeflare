@@ -44,6 +44,16 @@ export const getRepos = (accountId?: string): Promise<GitHubRepo[]> => {
   return api.get(path);
 };
 
+/**
+ * List a repository's branch names. Called lazily (when the branch dropdown opens) so it
+ * never blocks the create form's initial render or auto-detection. `repo` is `owner/repo`.
+ */
+export const getBranches = (repo: string, accountId?: string): Promise<string[]> => {
+  const params = new URLSearchParams({ repo });
+  if (accountId) params.set('account_id', accountId);
+  return api.get(`/github/branches?${params.toString()}`);
+};
+
 export interface DetectedEnvVar {
   key: string;
   description?: string | null;

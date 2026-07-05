@@ -4,9 +4,9 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Lock, Users, Globe, Server, Check, Link, Search, Folder, AlertCircle, Info, GitBranch, Terminal, AlertTriangle, XCircle, Plus, ArrowRight, MonitorPlay, Trash2, KeyRound, Loader2, ChevronDown } from 'lucide-react';
+import { Lock, Users, Globe, Server, Link, Search, Folder, AlertCircle, GitBranch, Terminal, AlertTriangle, XCircle, Plus, Trash2, KeyRound, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
-import { getLinkedAccounts, getRepos, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
+import { getLinkedAccounts, getRepos, getBranches, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
 import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -370,6 +370,33 @@ export default function NewServerPage() {
     { value: 'public', label: t('create.visibilityPublic'), desc: t('create.visibilityPublicDesc'), icon: <Globe className="w-5 h-5" /> },
   ], [t]);
 
+  // Branch dropdown. To keep the initial render and auto-detection fast, we DON'T fetch the
+  // full branch list up front — the menu shows just the detected/default branch immediately.
+  // The full list is fetched lazily the first time the user opens the dropdown (branchMenuOpen),
+  // then merged into the options below.
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const { data: remoteBranches } = useQuery<string[]>({
+    queryKey: ['github-branches', formData.github_repo, selectedAccountId],
+    queryFn: () => getBranches(formData.github_repo, selectedAccountId || undefined),
+    enabled: branchMenuOpen && !!formData.github_repo,
+    staleTime: 5 * 60_000,
+  });
+
+  // Seeded with the currently-selected + default branch (always available, no fetch), then
+  // extended with the lazily-fetched remote branches. `branchValue` always resolves to one of
+  // these so the native <select> stays controlled without an out-of-range value warning.
+  const branchOptions = useMemo(() => {
+    const opts: string[] = [];
+    for (const b of [formData.github_branch, selectedRepo?.default_branch, ...(remoteBranches ?? []), 'main']) {
+      if (b && !opts.includes(b)) opts.push(b);
+    }
+    return opts;
+  }, [formData.github_branch, selectedRepo, remoteBranches]);
+  const branchValue =
+    formData.github_branch && branchOptions.includes(formData.github_branch)
+      ? formData.github_branch
+      : branchOptions[0];
+
   const errorMessage = useMemo(() => {
     if (!createMutation.isError) return null;
     const error = createMutation.error as any;
@@ -579,10 +606,6 @@ export default function NewServerPage() {
                   {publicRepoError}
                 </p>
               )}
-              <p className="text-xs text-gray-500 flex items-start gap-2">
-                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                {t('create.publicUrlHelp')}
-              </p>
             </div>
           )}
         </section>
@@ -625,237 +648,7 @@ export default function NewServerPage() {
               />
             </div>
 
-            {/* Detected deploy settings — folded away like Vercel; click to edit. */}
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((o) => !o)}
-              className="flex items-center gap-1.5 pt-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ChevronDown className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
-              {t('create.advancedSettings')}
-            </button>
-
-
             <div className="space-y-4">
-                {advancedOpen && (
-                <div className="space-y-4">
-                <div>
-                  <Label htmlFor="github_branch" className="text-gray-700">{t('create.branch')}</Label>
-                  <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                    <GitBranch className="w-4 h-4 text-gray-400" />
-                    <input
-                      id="github_branch"
-                      type="text"
-                      placeholder={t('create.branchPlaceholder')}
-                      value={formData.github_branch}
-                      onChange={(e) => setFormData(prev => ({ ...prev, github_branch: e.target.value }))}
-                      className="flex-1 bg-transparent text-sm focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-gray-700">{t('create.runtime')}</Label>
-                  {detecting ? (
-                    <div className="grid grid-cols-5 gap-3 mt-2">
-                      {runtimes.map((r) => (
-                        <Skeleton key={r.value} className="h-[86px]" />
-                      ))}
-                    </div>
-                  ) : (
-                  <div className="grid grid-cols-5 gap-3 mt-2">
-                    {runtimes.map((runtime) => {
-                      const isSelected = formData.runtime === runtime.value;
-                      return (
-                        <button
-                          key={runtime.value}
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, runtime: runtime.value as Runtime }))}
-                          className={`p-3 rounded-lg text-center transition-all duration-200 ${
-                            isSelected
-                              ? 'bg-white border border-gray-100 shadow-lg scale-110 z-10'
-                              : 'bg-white border border-gray-50 opacity-40 hover:opacity-70'
-                          }`}
-                        >
-                          <div className={`${isSelected ? 'w-12 h-12' : 'w-10 h-10'} mx-auto mb-2 rounded-lg ${runtime.color} flex items-center justify-center text-white transition-all duration-200`}>
-                            {runtime.icon}
-                          </div>
-                          <span className={`text-xs font-medium ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{runtime.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label className="text-gray-700">{t('create.transport')}</Label>
-                  {detecting ? (
-                    <div className="grid grid-cols-2 gap-3 mt-2">
-                      <Skeleton className="h-[76px]" />
-                      <Skeleton className="h-[76px]" />
-                    </div>
-                  ) : (
-                  <div className="grid grid-cols-2 gap-3 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, transport: 'sse' }))}
-                      className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
-                        formData.transport === 'sse'
-                          ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                          : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-center flex-shrink-0">
-                        <ArrowRight className={`w-6 h-6 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-400'}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="block font-semibold text-sm text-[#323232]">Streamable HTTP</span>
-                        <span className={`block text-xs mt-0.5 ${formData.transport === 'sse' ? 'text-violet-600' : 'text-gray-500'}`}>
-                          {t('create.transportSseDesc')}
-                        </span>
-                      </div>
-                      {formData.transport === 'sse' && (
-                        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                        </div>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, transport: 'stdio', port: undefined }))}
-                      className={`relative flex items-center gap-3 p-4 rounded-xl transition-all text-left ${
-                        formData.transport === 'stdio'
-                          ? 'bg-violet-50 border border-violet-200 shadow-sm'
-                          : 'bg-white border border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-center flex-shrink-0">
-                        <MonitorPlay className={`w-6 h-6 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-400'}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="block font-semibold text-sm text-[#323232]">STDIO</span>
-                        <span className={`block text-xs mt-0.5 ${formData.transport === 'stdio' ? 'text-violet-600' : 'text-gray-500'}`}>
-                          {t('create.transportStdioDesc')}
-                        </span>
-                      </div>
-                      {formData.transport === 'stdio' && (
-                        <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center">
-                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                        </div>
-                      )}
-                    </button>
-                  </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label htmlFor="root_directory" className="text-gray-700">{t('create.rootDirectory')}</Label>
-                  <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.rootDirectoryHelp')}</p>
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                    <Folder className="w-4 h-4 text-gray-400" />
-                    <input
-                      id="root_directory"
-                      type="text"
-                      placeholder="packages/mcp-server"
-                      value={formData.root_directory || ''}
-                      onChange={(e) => setFormData(prev => ({ ...prev, root_directory: e.target.value }))}
-                      className="flex-1 bg-transparent text-sm focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="mcp_path" className="text-gray-700">{t('create.mcpPath')}</Label>
-                  <p className="text-xs text-gray-500 mt-1 mb-2">
-                    {formData.transport === 'stdio' ? t('create.mcpPathAutoStdio') : t('create.mcpPathHelp')}
-                  </p>
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 ${
-                    formData.transport === 'stdio' ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-                  }`}>
-                    <Link className="w-4 h-4 text-gray-400" />
-                    <input
-                      id="mcp_path"
-                      type="text"
-                      placeholder="/mcp"
-                      value={formData.transport === 'stdio' ? '/mcp' : (formData.mcp_path || '/mcp')}
-                      onChange={(e) => setFormData(prev => ({ ...prev, mcp_path: e.target.value }))}
-                      disabled={formData.transport === 'stdio'}
-                      className={`flex-1 bg-transparent text-sm focus:outline-none ${
-                        formData.transport === 'stdio' ? 'text-gray-500 cursor-not-allowed' : ''
-                      }`}
-                    />
-                  </div>
-                </div>
-
-                {formData.transport === 'sse' && (
-                  <div>
-                    <Label htmlFor="port" className="text-gray-700">{t('create.port')}</Label>
-                    <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.portHelp')}</p>
-                    {detecting ? (
-                    <Skeleton className="h-[38px]" />
-                    ) : (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                      <Server className="w-4 h-4 text-gray-400" />
-                      <input
-                        id="port"
-                        type="number"
-                        min={1}
-                        max={65535}
-                        placeholder={String(formData.runtime === 'python' ? 8000 : (formData.runtime === 'go' || formData.runtime === 'rust') ? 8080 : 3000)}
-                        value={formData.port ?? ''}
-                        onChange={(e) => setFormData(prev => ({
-                          ...prev,
-                          port: e.target.value === '' ? undefined : Number(e.target.value),
-                        }))}
-                        className="flex-1 bg-transparent text-sm focus:outline-none"
-                      />
-                    </div>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <Label htmlFor="entry_command" className="text-gray-700">{t('create.entryCommand')}</Label>
-                  <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.entryCommandHelp')}</p>
-                  {detecting ? (
-                  <Skeleton className="h-[38px]" />
-                  ) : (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                    <Terminal className="w-4 h-4 text-gray-400" />
-                    <input
-                      id="entry_command"
-                      type="text"
-                      placeholder="python server.py"
-                      value={formData.entry_command || ''}
-                      onChange={(e) => setFormData(prev => ({ ...prev, entry_command: e.target.value || undefined }))}
-                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
-                    />
-                  </div>
-                  )}
-                </div>
-
-                <div>
-                  <Label htmlFor="build_command" className="text-gray-700">{t('create.buildCommand')}</Label>
-                  <p className="text-xs text-gray-500 mt-1 mb-2">{t('create.buildCommandHelp')}</p>
-                  {detecting ? (
-                  <Skeleton className="h-[38px]" />
-                  ) : (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
-                    <Terminal className="w-4 h-4 text-gray-400" />
-                    <input
-                      id="build_command"
-                      type="text"
-                      placeholder="npm run build"
-                      value={formData.build_command || ''}
-                      onChange={(e) => setFormData(prev => ({ ...prev, build_command: e.target.value || undefined }))}
-                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
-                    />
-                  </div>
-                  )}
-                </div>
-                </div>
-                )}
 
                 {/* Machine memory */}
                 <MemorySelect
@@ -884,7 +677,6 @@ export default function NewServerPage() {
                       <Label className="text-gray-700 cursor-pointer" onClick={() => setFormData(prev => ({ ...prev, auth_enabled: !prev.auth_enabled }))}>
                         {t('create.authEnabled')}
                       </Label>
-                      <p className="text-xs text-gray-500 mt-1">{t('create.authEnabledHelp')}</p>
                       {!formData.auth_enabled && (
                         <div className="mt-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
                           <p className="text-xs text-amber-700 flex items-start gap-2">
@@ -900,7 +692,19 @@ export default function NewServerPage() {
                 {/* Environment Variables */}
                 <div className="pt-4 border-t border-gray-100">
                   <Label className="text-gray-700">{t('create.envVars')}</Label>
-                  <p className="text-xs text-gray-500 mt-1 mb-3">{t('create.envVarsHelp')}</p>
+
+                  {detecting && envVars.length === 0 && (
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-[38px] w-1/3" />
+                        <Skeleton className="h-[38px] flex-1" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-[38px] w-1/3" />
+                        <Skeleton className="h-[38px] flex-1" />
+                      </div>
+                    </div>
+                  )}
 
                   {detecting && envVars.length === 0 && (
                     <div className="space-y-2 mb-3">
@@ -1005,6 +809,208 @@ export default function NewServerPage() {
               );
             })}
           </div>
+        </section>
+
+        {/* Build & deploy settings */}
+        <section>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+              {t('create.advancedSettings')}
+            </button>
+                {advancedOpen && (
+                <div className="mt-3 space-y-4 rounded-[10px] border border-input p-4">
+                <div>
+                  <Label htmlFor="github_branch" className="text-gray-700">{t('create.branch')}</Label>
+                  <div className="relative mt-2 w-full sm:w-56">
+                    <GitBranch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <select
+                      id="github_branch"
+                      value={branchValue}
+                      onChange={(e) => setFormData(prev => ({ ...prev, github_branch: e.target.value }))}
+                      // First interaction triggers the lazy fetch of the full branch list.
+                      onMouseDown={() => setBranchMenuOpen(true)}
+                      onFocus={() => setBranchMenuOpen(true)}
+                      className="peer h-10 w-full appearance-none rounded-[10px] border border-input bg-background pl-9 pr-9 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      {branchOptions.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 transition-colors peer-focus:text-gray-600" />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-gray-700">{t('create.runtime')}</Label>
+                  {detecting ? (
+                    <div className="grid grid-cols-5 gap-3 mt-2">
+                      {runtimes.map((r) => (
+                        <Skeleton key={r.value} className="h-[86px]" />
+                      ))}
+                    </div>
+                  ) : (
+                  <div className="grid grid-cols-5 gap-3 mt-2">
+                    {runtimes.map((runtime) => {
+                      const isSelected = formData.runtime === runtime.value;
+                      return (
+                        <button
+                          key={runtime.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, runtime: runtime.value as Runtime }))}
+                          className={`p-3 rounded-lg text-center transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-white border border-gray-100 shadow-lg scale-110 z-10'
+                              : 'bg-white border border-gray-50 opacity-40 hover:opacity-70'
+                          }`}
+                        >
+                          <div className={`${isSelected ? 'w-12 h-12' : 'w-10 h-10'} mx-auto mb-2 rounded-lg ${runtime.color} flex items-center justify-center text-white transition-all duration-200`}>
+                            {runtime.icon}
+                          </div>
+                          <span className={`text-xs font-medium ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{runtime.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-gray-700">{t('create.transport')}</Label>
+                  {detecting ? (
+                    <div className="flex flex-wrap gap-3 mt-2">
+                      <Skeleton className="h-[42px] w-44" />
+                      <Skeleton className="h-[42px] w-32" />
+                    </div>
+                  ) : (
+                  <div className="flex flex-wrap gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'sse' }))}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
+                        formData.transport === 'sse' ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <Globe className="w-4 h-4 text-[#323232]" />
+                      <span className="font-medium text-sm text-[#323232]">Streamable HTTP</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'stdio', port: undefined }))}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
+                        formData.transport === 'stdio' ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <Terminal className="w-4 h-4 text-[#323232]" />
+                      <span className="font-medium text-sm text-[#323232]">STDIO</span>
+                    </button>
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="root_directory" className="text-gray-700">{t('create.rootDirectory')}</Label>
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Folder className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="root_directory"
+                      type="text"
+                      placeholder="packages/mcp-server"
+                      value={formData.root_directory || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, root_directory: e.target.value }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="mcp_path" className="text-gray-700">{t('create.mcpPath')}</Label>
+                  <div className={`mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input px-3 transition-colors ${
+                    formData.transport === 'stdio' ? 'bg-gray-100 cursor-not-allowed' : 'bg-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2'
+                  }`}>
+                    <Link className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="mcp_path"
+                      type="text"
+                      placeholder="/mcp"
+                      value={formData.transport === 'stdio' ? '/mcp' : (formData.mcp_path || '/mcp')}
+                      onChange={(e) => setFormData(prev => ({ ...prev, mcp_path: e.target.value }))}
+                      disabled={formData.transport === 'stdio'}
+                      className={`flex-1 bg-transparent text-sm focus:outline-none ${
+                        formData.transport === 'stdio' ? 'text-gray-500 cursor-not-allowed' : ''
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {formData.transport === 'sse' && (
+                  <div>
+                    <Label htmlFor="port" className="text-gray-700">{t('create.port')}</Label>
+                    {detecting ? (
+                    <Skeleton className="mt-2 h-10" />
+                    ) : (
+                    <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                      <Server className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <input
+                        id="port"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        placeholder={String(formData.runtime === 'python' ? 8000 : (formData.runtime === 'go' || formData.runtime === 'rust') ? 8080 : 3000)}
+                        value={formData.port ?? ''}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          port: e.target.value === '' ? undefined : Number(e.target.value),
+                        }))}
+                        className="flex-1 bg-transparent text-sm focus:outline-none"
+                      />
+                    </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <Label htmlFor="entry_command" className="text-gray-700">{t('create.entryCommand')}</Label>
+                  {detecting ? (
+                  <Skeleton className="mt-2 h-10" />
+                  ) : (
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Terminal className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="entry_command"
+                      type="text"
+                      placeholder="python server.py"
+                      value={formData.entry_command || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, entry_command: e.target.value || undefined }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
+                    />
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="build_command" className="text-gray-700">{t('create.buildCommand')}</Label>
+                  {detecting ? (
+                  <Skeleton className="mt-2 h-10" />
+                  ) : (
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Terminal className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="build_command"
+                      type="text"
+                      placeholder="npm run build"
+                      value={formData.build_command || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, build_command: e.target.value || undefined }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
+                    />
+                  </div>
+                  )}
+                </div>
+                </div>
+                )}
         </section>
 
         {/* Error Message */}

@@ -34,7 +34,6 @@ export function MemorySelect({ value, onChange, maxMemoryMb, id = 'memory_mb' }:
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{t('create.machineMemory')}</Label>
-      <p className="text-xs text-muted-foreground">{t('create.machineMemoryHelp')}</p>
       <div className="relative w-full sm:w-48">
         <Select
           id={id}
