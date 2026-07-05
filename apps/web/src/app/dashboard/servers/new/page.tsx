@@ -752,7 +752,7 @@ export default function NewServerPage() {
               {t('create.envVars')}
             </button>
             {envOpen && (
-            <div className="space-y-4 px-4 pb-4">
+            <div className="space-y-4 border-t border-input p-4">
               {detecting && envVars.length === 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -825,7 +825,7 @@ export default function NewServerPage() {
               {t('create.advancedSettings')}
             </button>
                 {advancedOpen && (
-                <div className="space-y-4 px-4 pb-4">
+                <div className="space-y-4 border-t border-input p-4">
                 <div>
                   <Label htmlFor="github_branch" className="text-xs">{t('create.branch')}</Label>
                   <div className="relative mt-2 w-full sm:w-56">

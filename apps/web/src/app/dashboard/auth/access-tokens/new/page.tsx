@@ -201,7 +201,7 @@ export default function NewAccessTokenPage() {
           <Button
             type="button"
             onClick={() => router.push('/dashboard/auth/access-tokens')}
-            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-violet-600 border border-violet-700 rounded-[10px] hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-gray-900 border border-gray-900 rounded-[10px] hover:bg-gray-800 active:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {tCommon('done')}
           </Button>
@@ -241,7 +241,7 @@ export default function NewAccessTokenPage() {
             <button
               type="button"
               onClick={() => setIsServerListOpen(!isServerListOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-input bg-white hover:border-gray-300 transition-colors text-left"
+              className="w-full flex items-center justify-between px-4 py-3 rounded-[10px] border border-input bg-white hover:border-gray-300 transition-colors text-left"
             >
               {selectedServerId ? (
                 <span className="font-medium text-gray-900">
@@ -255,7 +255,7 @@ export default function NewAccessTokenPage() {
 
             {/* Dropdown List */}
             {isServerListOpen && (
-              <div className="absolute z-10 mt-2 w-full rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+              <div className="absolute z-10 mt-2 w-full rounded-[10px] border border-input bg-white shadow-lg overflow-hidden">
                 <div className="p-3 border-b border-gray-100">
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50">
                     <Search className="w-4 h-4 text-gray-400" />
@@ -275,7 +275,7 @@ export default function NewAccessTokenPage() {
                     onClick={() => handleSelectServer('all')}
                     className={`w-full flex items-center justify-between p-3 transition-colors text-left ${
                       selectedServerId === 'all'
-                        ? 'bg-violet-50'
+                        ? 'bg-gray-100'
                         : 'hover:bg-gray-50'
                     }`}
                   >
@@ -285,7 +285,7 @@ export default function NewAccessTokenPage() {
                         {workspaceServers.length}
                       </span>
                       {selectedServerId === 'all' && (
-                        <Check className="w-5 h-5 text-violet-600" />
+                        <Check className="w-5 h-5 text-gray-900" />
                       )}
                     </div>
                   </button>
@@ -303,13 +303,13 @@ export default function NewAccessTokenPage() {
                         onClick={() => handleSelectServer(server.id)}
                         className={`w-full flex items-center justify-between p-3 transition-colors text-left ${
                           selectedServerId === server.id
-                            ? 'bg-violet-50'
+                            ? 'bg-gray-100'
                             : 'hover:bg-gray-50'
                         }`}
                       >
                         <span className="font-medium text-gray-900 truncate">{server.name}</span>
                         {selectedServerId === server.id && (
-                          <Check className="w-5 h-5 text-violet-600 flex-shrink-0" />
+                          <Check className="w-5 h-5 text-gray-900 flex-shrink-0" />
                         )}
                       </button>
                     ))
@@ -332,7 +332,7 @@ export default function NewAccessTokenPage() {
             >
               <span className="text-sm font-medium text-gray-700">{t('scopes.fullAccess')}</span>
               <div className={`w-11 h-6 rounded-full p-0.5 transition-colors ${
-                selectedScopes.includes('*') ? 'bg-violet-600' : 'bg-gray-300'
+                selectedScopes.includes('*') ? 'bg-gray-900' : 'bg-gray-300'
               }`}>
                 <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
                   selectedScopes.includes('*') ? 'translate-x-5' : 'translate-x-0'
@@ -354,7 +354,7 @@ export default function NewAccessTokenPage() {
                 >
                   <span className="text-sm font-medium text-gray-700">{option.label}</span>
                   <div className={`w-11 h-6 rounded-full p-0.5 transition-colors ${
-                    isChecked ? 'bg-violet-600' : 'bg-gray-300'
+                    isChecked ? 'bg-gray-900' : 'bg-gray-300'
                   }`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
                       isChecked ? 'translate-x-5' : 'translate-x-0'
@@ -366,7 +366,7 @@ export default function NewAccessTokenPage() {
           </div>
 
           <div className="mt-6">
-            <Label htmlFor="customScope" className="text-gray-700">{t('customScope')}</Label>
+            <Label htmlFor="customScope" className="text-xs">{t('customScope')}</Label>
             <div className="flex gap-2 mt-2">
               <Input
                 id="customScope"
@@ -383,18 +383,18 @@ export default function NewAccessTokenPage() {
 
           {selectedScopes.length > 0 && !selectedScopes.includes('*') && (
             <div className="mt-6">
-              <Label className="text-gray-700 mb-2 block">{t('scopes.selected')}</Label>
+              <Label className="text-xs mb-2 block">{t('scopes.selected')}</Label>
               <div className="flex flex-wrap gap-1.5">
                 {selectedScopes.map((scope) => (
                   <span
                     key={scope}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm bg-violet-100 text-violet-700 rounded-md"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm bg-gray-100 text-gray-700 rounded-md"
                   >
                     <code className="text-xs font-mono">{scope}</code>
                     <button
                       type="button"
                       onClick={() => removeScope(scope)}
-                      className="text-violet-400 hover:text-violet-600 transition-colors"
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -408,29 +408,18 @@ export default function NewAccessTokenPage() {
         {/* Expiration */}
         <section>
           <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{tCommon('expiration')}</h2>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { label: tCommon('expiry1d'), days: 1 as number | null },
-              { label: tCommon('expiry1w'), days: 7 as number | null },
-              { label: tCommon('expiry30d'), days: 30 as number | null },
-              { label: tCommon('expiryNever'), days: null as number | null },
-            ].map((opt) => {
-              const selected = expiresInDays === opt.days;
-              return (
-                <button
-                  key={opt.label}
-                  type="button"
-                  onClick={() => setExpiresInDays(opt.days)}
-                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    selected
-                      ? 'bg-violet-50 border-violet-300 text-violet-700'
-                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+          <div className="relative w-full sm:w-64">
+            <select
+              value={expiresInDays === null ? 'never' : String(expiresInDays)}
+              onChange={(e) => setExpiresInDays(e.target.value === 'never' ? null : Number(e.target.value))}
+              className="peer h-10 w-full appearance-none rounded-[10px] border border-input bg-background pl-3 pr-9 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="1">{tCommon('expiry1d')}</option>
+              <option value="7">{tCommon('expiry1w')}</option>
+              <option value="30">{tCommon('expiry30d')}</option>
+              <option value="never">{tCommon('expiryNever')}</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 transition-colors peer-focus:text-gray-600" />
           </div>
         </section>
 
@@ -451,7 +440,7 @@ export default function NewAccessTokenPage() {
           <Button
             type="submit"
             disabled={createMutation.isPending || !workspaceId || !selectedServerId}
-            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-violet-600 border border-violet-700 rounded-[10px] hover:bg-violet-700 active:bg-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center gap-1.5 h-7 px-2.5 text-xs font-medium text-white bg-gray-900 border border-gray-900 rounded-[10px] hover:bg-gray-800 active:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {createMutation.isPending ? (
               <div className="w-3.5 h-3.5 border-2 rounded-full border-white/30 border-t-white animate-spin" />
