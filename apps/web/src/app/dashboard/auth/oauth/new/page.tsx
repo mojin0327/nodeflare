@@ -121,13 +121,11 @@ export default function NewOAuthAppPage() {
   };
 
   const addCustomScope = () => {
-    if (customScope && !selectedScopes.includes(customScope)) {
-      setSelectedScopes((prev) => {
-        const filtered = prev.filter((s) => s !== '*');
-        return [...filtered, customScope];
-      });
-      setCustomScope('');
+    const scope = customScope.trim();
+    if (scope && !selectedScopes.includes(scope)) {
+      setSelectedScopes((prev) => [...prev.filter((s) => s !== '*'), scope]);
     }
+    setCustomScope('');
   };
 
   const removeScope = (scope: string) => {
@@ -267,25 +265,26 @@ export default function NewOAuthAppPage() {
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* Name */}
         <section>
-          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.name')}</h2>
+          <Label htmlFor="name" className="text-xs">{t('create.name')}</Label>
           <Input
             id="name"
             placeholder={t('create.namePlaceholder')}
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            className="mt-2"
           />
         </section>
 
         {/* Server */}
         <section>
-          <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4">{t('create.server')}</h2>
-          <div className="relative">
+          <Label className="text-xs">{t('create.server')}</Label>
+          <div className="relative mt-2">
             {/* Selected Server Display / Trigger */}
             <button
               type="button"
               onClick={() => setIsServerListOpen(!isServerListOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-[10px] border border-input bg-white hover:border-gray-300 transition-colors text-left"
+              className="w-full flex items-center justify-between h-10 px-3 rounded-[10px] border border-input bg-white hover:border-gray-300 transition-colors text-left"
             >
               {selectedServerId ? (
                 <span className="font-medium text-gray-900">
@@ -423,42 +422,44 @@ export default function NewOAuthAppPage() {
 
           <div className="mt-6">
             <Label htmlFor="customScope" className="text-xs">{t('customScope')}</Label>
-            <div className="flex gap-2 mt-2">
-              <Input
+            {/* Unified tag input: selected scopes render as chips, with an inline entry that
+                commits on Enter/comma. Backspace on an empty field removes the last chip. */}
+            <div className="mt-2 flex min-h-10 w-full flex-wrap items-center gap-1.5 rounded-[10px] border border-input bg-background px-2 py-1.5 ring-offset-background transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+              {selectedScopes.filter((s) => s !== '*').map((scope) => (
+                <span
+                  key={scope}
+                  className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-mono text-gray-700"
+                >
+                  {scope}
+                  <button
+                    type="button"
+                    onClick={() => removeScope(scope)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    aria-label={`Remove ${scope}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <input
                 id="customScope"
-                placeholder="tools:call:specific_tool_name"
                 value={customScope}
                 onChange={(e) => setCustomScope(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addCustomScope();
+                  } else if (e.key === 'Backspace' && customScope === '') {
+                    const items = selectedScopes.filter((s) => s !== '*');
+                    if (items.length > 0) removeScope(items[items.length - 1]);
+                  }
+                }}
+                placeholder={selectedScopes.some((s) => s !== '*') ? '' : 'tools:call:specific_tool_name'}
+                className="min-w-[10rem] flex-1 bg-transparent px-1 py-0.5 text-sm font-mono focus:outline-none"
               />
-              <Button type="button" variant="outline" onClick={addCustomScope}>
-                {tCommon('add')}
-              </Button>
             </div>
             <p className="text-xs text-gray-500 mt-2">{t('customScopeExamples')}</p>
           </div>
-
-          {selectedScopes.length > 0 && !selectedScopes.includes('*') && (
-            <div className="mt-6">
-              <Label className="text-xs mb-2 block">{t('scopes.selected')}</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {selectedScopes.map((scope) => (
-                  <span
-                    key={scope}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm bg-gray-100 text-gray-700 rounded-md"
-                  >
-                    <code className="text-xs font-mono">{scope}</code>
-                    <button
-                      type="button"
-                      onClick={() => removeScope(scope)}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </section>
 
         {/* Expiration */}
