@@ -11,7 +11,7 @@ use bytes::Bytes;
 use fred::interfaces::ClientLike;
 use futures::StreamExt;
 use mcp_common::{AppConfig, McpMethod, ScopeChecker};
-use mcp_db::ServerRepository;
+use mcp_db::{ServerRepository, WorkspaceRepository};
 use auth::AuthCredential;
 use serde::Serialize;
 use std::sync::Arc;
@@ -48,6 +48,10 @@ pub struct ProxyState {
     pub redis_cache: RedisCache,
     /// Maximum request body size accepted from clients / read from upstreams.
     pub body_limit: usize,
+    /// Maximum size of a (buffered, non-SSE) upstream response we will read into memory.
+    /// Upstreams are tenant-controlled, so this bounds a single response's memory use and
+    /// prevents a malicious/huge reply from OOM-ing the shared proxy.
+    pub max_upstream_response_bytes: usize,
     /// Gemini embedding client for semantic search_tools. `None` disables semantic
     /// search (falls back to lexical) when GEMINI_API_KEY is unset.
     pub embedding: Option<embedding::EmbeddingClient>,
@@ -119,6 +123,10 @@ async fn main() -> Result<()> {
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(upstream_timeout_secs))
         .pool_idle_timeout(std::time::Duration::from_secs(pool_idle_timeout_secs))
+        // SECURITY (SSRF): never auto-follow upstream redirects. Upstreams are
+        // tenant-controlled and could 302 us at 169.254.169.254 / localhost / other
+        // tenants' *.internal addresses. Return the 3xx to the caller instead.
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
     // SSE/streaming client: built once and reused (was previously rebuilt per
@@ -132,6 +140,8 @@ async fn main() -> Result<()> {
         .connect_timeout(std::time::Duration::from_secs(10))
         .read_timeout(std::time::Duration::from_secs(sse_idle_timeout_secs))
         .pool_idle_timeout(std::time::Duration::from_secs(pool_idle_timeout_secs))
+        // SECURITY (SSRF): see http_client above — don't follow tenant-controlled redirects.
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
     // Request cache: TTL and max entries from environment
@@ -154,6 +164,12 @@ async fn main() -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10 * 1024 * 1024); // 10MB default for proxy
 
+    // Cap on how much of a (buffered) upstream response we read into memory (DoS guard).
+    let max_upstream_response_bytes: usize = std::env::var("PROXY_MAX_UPSTREAM_RESPONSE_BYTES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10 * 1024 * 1024); // 10MB default
+
     // Optional Gemini embedding client for semantic search_tools (None = lexical only).
     let embedding = embedding::EmbeddingClient::from_env(http_client.clone());
     // Optional sandboxed code runner for code mode (None = run_code unavailable).
@@ -168,6 +184,7 @@ async fn main() -> Result<()> {
         request_cache,
         redis_cache,
         body_limit,
+        max_upstream_response_bytes,
         embedding,
         code_runner,
     });
@@ -417,14 +434,11 @@ async fn proxy_handler(
             .map_err(|e| add_host_to_error(e))?;
         tracing::info!("proxy_handler: credential validated successfully (took {:?})", start.elapsed());
 
-        // Verify credential has access to this server
-        if let Some(cred_server_id) = credential.server_id() {
-            tracing::debug!("proxy_handler: checking server access, cred_server_id={}, server.id={}", cred_server_id, server.id);
-            if cred_server_id != server.id {
-                tracing::warn!("proxy_handler: credential not valid for this server");
-                return Err(ProxyError::Forbidden("Credential not valid for this server".into()));
-            }
-        }
+        // Verify the credential is authorized for THIS server / workspace (tenant
+        // isolation). Must run before forwarding — the target server is chosen purely
+        // from the caller-supplied host label, so without this an authenticated
+        // credential from any tenant could reach any other tenant's server.
+        authorize_credential_for_server(&state, &credential, &server).await?;
 
         // Check rate limit (per-minute) - graceful degradation on Redis errors
         tracing::debug!("proxy_handler: checking rate limit");
@@ -517,6 +531,65 @@ async fn proxy_handler(
     });
 
     Ok(response)
+}
+
+/// Enforce that a validated credential is authorized to reach `server`'s workspace.
+///
+/// The target server is resolved from the caller-controlled host label, so credential
+/// validity alone is not enough — we must confirm the credential's owner belongs to the
+/// server's tenant, or one tenant's token could be replayed against another's server.
+///
+/// Rules (fail-closed):
+/// 1. Server-bound credential (`server_id` set): must match this exact server.
+/// 2. Workspace-bound credential (`workspace_id` set, e.g. API keys and workspace OAuth
+///    clients): must match this server's workspace.
+/// 3. Account-wide credential (DCR OAuth token, no workspace/server binding): the
+///    authorizing user must be a member of this server's workspace.
+async fn authorize_credential_for_server(
+    state: &ProxyState,
+    credential: &AuthCredential,
+    server: &CachedServer,
+) -> Result<(), ProxyError> {
+    // 1. Server-bound credential.
+    if let Some(cred_server_id) = credential.server_id() {
+        if cred_server_id != server.id {
+            tracing::warn!("authorize: credential server_id={} != server.id={}", cred_server_id, server.id);
+            return Err(ProxyError::Forbidden("Credential not valid for this server".into()));
+        }
+        return Ok(());
+    }
+
+    // 2. Workspace-bound credential.
+    if let Some(cred_ws) = credential.workspace_id() {
+        if cred_ws != server.workspace_id {
+            tracing::warn!("authorize: credential workspace_id={} != server.workspace_id={}", cred_ws, server.workspace_id);
+            return Err(ProxyError::Forbidden("Credential not valid for this workspace".into()));
+        }
+        return Ok(());
+    }
+
+    // 3. Account-wide credential: only OAuth tokens reach here (API keys always carry a
+    //    workspace_id). The authorizing user must be a member of the target workspace.
+    match credential {
+        AuthCredential::OAuthToken(token) => {
+            let is_member = WorkspaceRepository::get_member(&state.db, server.workspace_id, token.user_id)
+                .await
+                .map_err(|e| ProxyError::Internal(e.to_string()))?
+                .is_some();
+            if !is_member {
+                tracing::warn!(
+                    "authorize: user_id={} is not a member of workspace_id={} (token client_id={})",
+                    token.user_id, server.workspace_id, token.oauth_client_id
+                );
+                return Err(ProxyError::Forbidden("Token not authorized for this workspace".into()));
+            }
+            Ok(())
+        }
+        AuthCredential::ApiKey(_) => {
+            // Unreachable: ApiKey::workspace_id is non-optional, so rule 2 already returned.
+            Err(ProxyError::Forbidden("Credential not authorized".into()))
+        }
+    }
 }
 
 /// Resolve the server addressed by a request's host label.
@@ -1555,7 +1628,7 @@ async fn execute_upstream_request(
     req_builder = req_builder.body(body_bytes);
 
     // Send request
-    let response = req_builder
+    let mut response = req_builder
         .send()
         .await
         .map_err(|e| ProxyError::ServiceUnavailable(format!("Upstream error: {}", e)))?;
@@ -1580,10 +1653,33 @@ async fn execute_upstream_request(
         })
         .collect();
 
-    let body = response
-        .bytes()
+    // SECURITY (DoS): the upstream is tenant-controlled, so bound how much we buffer.
+    // Reject early on a too-large Content-Length, then enforce again while streaming
+    // (chunked replies may omit or understate the length).
+    let max_bytes = state.max_upstream_response_bytes;
+    if let Some(len) = response.content_length() {
+        if len as usize > max_bytes {
+            return Err(ProxyError::ServiceUnavailable(format!(
+                "Upstream response too large: {} bytes (limit {})",
+                len, max_bytes
+            )));
+        }
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read response: {}", e)))?;
+        .map_err(|e| ProxyError::Internal(format!("Failed to read response: {}", e)))?
+    {
+        if buf.len() + chunk.len() > max_bytes {
+            return Err(ProxyError::ServiceUnavailable(format!(
+                "Upstream response exceeded {} byte limit",
+                max_bytes
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    let body = Bytes::from(buf);
 
     tracing::info!("upstream response: status={}", status);
     // Response body may contain sensitive data — log only at DEBUG

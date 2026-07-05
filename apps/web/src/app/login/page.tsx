@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { FaGithub } from 'react-icons/fa6';
 import { HiOutlineMail } from 'react-icons/hi';
 import { login } from '@/lib/auth-api';
+import { isSafeReturnTo } from '@/lib/safe-redirect';
 
 const GoogleIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24">
@@ -49,8 +50,11 @@ export default function LoginPage() {
     try {
       await login(email, password);
       // Redirect to dashboard or return_to URL
-      // Use window.location for full page reload to ensure cookies are applied
-      const redirectUrl = returnTo || '/dashboard';
+      // Use window.location for full page reload to ensure cookies are applied.
+      // SECURITY: only follow return_to if it is a safe same-origin relative path,
+      // otherwise an attacker could set ?return_to=https://evil.com (open redirect) or
+      // a javascript: URL (XSS). Falls back to /dashboard.
+      const redirectUrl = isSafeReturnTo(returnTo) ? returnTo! : '/dashboard';
       window.location.href = redirectUrl;
     } catch (err) {
       const message = err instanceof Error ? err.message : tErrors('serverError');

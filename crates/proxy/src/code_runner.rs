@@ -16,6 +16,9 @@ pub struct CodeRunnerClient {
     /// Base URL the *sandboxed code* uses to call tools back into this proxy. The
     /// runner injects `tools.*` to POST here; the endpoint re-checks scope per call.
     tools_callback_base: String,
+    /// Shared secret presented to the runner's `/run` as `Authorization: Bearer`. The
+    /// runner enforces it when set on its side. `None` = not configured (open runner).
+    auth_token: Option<String>,
     timeout_secs: u64,
     max_tool_calls: u32,
 }
@@ -56,11 +59,18 @@ impl CodeRunnerClient {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50);
+        let auth_token = std::env::var("CODE_RUNNER_TOKEN")
+            .ok()
+            .filter(|t| !t.trim().is_empty());
+        if auth_token.is_none() {
+            tracing::warn!("CODE_RUNNER_TOKEN unset: code runner requests are unauthenticated");
+        }
         tracing::info!("code execution enabled: runner={}", runner_url);
         Some(Self {
             http,
             runner_url,
             tools_callback_base,
+            auth_token,
             timeout_secs,
             max_tool_calls,
         })
@@ -85,10 +95,11 @@ impl CodeRunnerClient {
     /// Execute code in the sandbox. Returns the textual result, or an error string.
     pub async fn run(&self, req: RunRequest) -> Result<String, String> {
         let url = format!("{}/run", self.runner_url.trim_end_matches('/'));
-        let resp = self
-            .http
-            .post(&url)
-            .json(&req)
+        let mut builder = self.http.post(&url).json(&req);
+        if let Some(token) = &self.auth_token {
+            builder = builder.bearer_auth(token);
+        }
+        let resp = builder
             .send()
             .await
             .map_err(|e| format!("runner unreachable: {e}"))?;

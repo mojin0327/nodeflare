@@ -9,6 +9,9 @@ primary_region = "iad"
 
 [env]
   PORT = "8080"
+  # DoS guards per sandbox: JS heap cap (MB) and max buffered output bytes (4MB).
+  RUNNER_MAX_HEAP_MB = "128"
+  RUNNER_MAX_OUTPUT_BYTES = "4194304"
 
 [http_service]
   internal_port = 8080

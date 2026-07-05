@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
 import { SquareLoader } from '@/components/ui/square-loader';
+import { isSafeRedirectUri } from '@/lib/safe-redirect';
 
 interface ClientInfo {
   client_id: string;
@@ -73,9 +74,17 @@ function ConsentInner() {
     };
   }, [refreshUser, clientId, redirectUri, fullPath]);
 
-  const clientRedirect = (queryPart: string) => {
+  // Navigate back to the client's redirect_uri with a query appended. SECURITY: the
+  // redirect_uri comes from the URL, so validate it (absolute http(s) only) before
+  // navigating — otherwise `redirect_uri=javascript:...` would run as XSS on click and a
+  // non-registered URL would be an open redirect. Falls back to /dashboard when unsafe.
+  const goToClient = (queryPart: string) => {
+    if (!isSafeRedirectUri(redirectUri)) {
+      window.location.href = '/dashboard';
+      return;
+    }
     const sep = redirectUri.includes('?') ? '&' : '?';
-    return `${redirectUri}${sep}${queryPart}`;
+    window.location.href = `${redirectUri}${sep}${queryPart}`;
   };
 
   const approve = async () => {
@@ -92,7 +101,7 @@ function ConsentInner() {
         state: stateParam,
         scope,
       });
-      window.location.href = clientRedirect(
+      goToClient(
         `code=${encodeURIComponent(res.code)}&state=${encodeURIComponent(stateParam)}`,
       );
     } catch {
@@ -103,9 +112,7 @@ function ConsentInner() {
 
   const deny = () => {
     if (redirectUri) {
-      window.location.href = clientRedirect(
-        `error=access_denied&state=${encodeURIComponent(stateParam)}`,
-      );
+      goToClient(`error=access_denied&state=${encodeURIComponent(stateParam)}`);
     } else {
       window.location.href = '/dashboard';
     }

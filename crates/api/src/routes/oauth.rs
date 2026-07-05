@@ -10,7 +10,7 @@ use chrono::{Duration, Utc};
 use mcp_auth::ApiKeyService;
 use mcp_common::types::WorkspaceRole;
 use mcp_db::{
-    OAuthAccessTokenRepository, OAuthAuthorizationCodeRepository, OAuthClientRepository,
+    OAuthAccessTokenRepository, OAuthAuthorizationCodeRepository, OAuthClient, OAuthClientRepository,
     OAuthRefreshTokenRepository, WorkspaceRepository,
     CreateOAuthAccessToken, CreateOAuthAuthorizationCode, CreateOAuthClient,
     CreateOAuthRefreshToken,
@@ -665,7 +665,6 @@ pub struct TokenRequest {
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
     pub client_id: Option<String>,
-    #[allow(dead_code)]
     pub client_secret: Option<String>,
 }
 
@@ -684,8 +683,17 @@ pub struct TokenResponse {
 /// Accepts application/x-www-form-urlencoded as per OAuth 2.0 RFC 6749
 pub async fn token(
     State(state): State<Arc<AppState>>,
-    Form(body): Form<TokenRequest>,
+    headers: HeaderMap,
+    Form(mut body): Form<TokenRequest>,
 ) -> Result<Json<TokenResponse>, (StatusCode, Json<TokenErrorResponse>)> {
+    // RFC 6749 client_secret_basic: fold HTTP Basic client credentials into the body so
+    // the grant handlers see a single representation (client_secret_post uses the body
+    // fields directly). Only fills gaps — an explicit body value wins.
+    if let Some((basic_id, basic_secret)) = parse_basic_client_auth(&headers) {
+        body.client_id.get_or_insert(basic_id);
+        body.client_secret.get_or_insert(basic_secret);
+    }
+
     tracing::info!(
         "OAuth token request: grant_type={}, client_id={:?}",
         body.grant_type,
@@ -709,6 +717,63 @@ pub async fn token(
 pub struct TokenErrorResponse {
     pub error: String,
     pub error_description: Option<String>,
+}
+
+/// Parse `Authorization: Basic <base64(client_id:client_secret)>` (RFC 6749 §2.3.1).
+fn parse_basic_client_auth(headers: &HeaderMap) -> Option<(String, String)> {
+    use base64::engine::general_purpose::STANDARD;
+    let raw = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    let b64 = raw
+        .strip_prefix("Basic ")
+        .or_else(|| raw.strip_prefix("basic "))?;
+    let decoded = STANDARD.decode(b64.trim()).ok()?;
+    let creds = String::from_utf8(decoded).ok()?;
+    let (id, secret) = creds.split_once(':')?;
+    // Credentials are application/x-www-form-urlencoded per the spec.
+    let id = urlencoding::decode(id).ok()?.into_owned();
+    let secret = urlencoding::decode(secret).ok()?.into_owned();
+    Some((id, secret))
+}
+
+/// Authenticate the client at the token endpoint (RFC 6749 §3.2.1).
+/// - A presented `client_id` (if any) must match the client the grant was issued to.
+/// - Confidential clients (`token_endpoint_auth_method != "none"`) must present a valid
+///   `client_secret`. Public clients (PKCE-only, e.g. dynamically-registered MCP clients
+///   like Claude) have auth method "none" and are unaffected — PKCE is their protection.
+fn verify_client_auth(
+    client: &OAuthClient,
+    presented_client_id: Option<&str>,
+    presented_secret: Option<&str>,
+) -> Result<(), (StatusCode, Json<TokenErrorResponse>)> {
+    if let Some(presented) = presented_client_id {
+        if presented != client.client_id {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(TokenErrorResponse {
+                    error: "invalid_grant".to_string(),
+                    error_description: Some("client_id does not match the grant".to_string()),
+                }),
+            ));
+        }
+    }
+
+    if client.token_endpoint_auth_method != "none" {
+        if let Some(hash) = client.client_secret_hash.as_deref() {
+            let ok = presented_secret
+                .map(|s| ApiKeyService::verify(s, hash))
+                .unwrap_or(false);
+            if !ok {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(TokenErrorResponse {
+                        error: "invalid_client".to_string(),
+                        error_description: Some("Invalid client credentials".to_string()),
+                    }),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn exchange_code(
@@ -800,16 +865,26 @@ async fn exchange_code(
         ));
     }
 
+    // Authenticate the client the code was issued to (client_id match + client_secret for
+    // confidential clients) BEFORE consuming the code.
+    let client = OAuthClientRepository::find_by_id(&state.db, auth_code.client_id)
+        .await
+        .ok()
+        .flatten()
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(TokenErrorResponse {
+                error: "invalid_client".to_string(),
+                error_description: Some("Unknown client".to_string()),
+            }),
+        ))?;
+    verify_client_auth(&client, body.client_id.as_deref(), body.client_secret.as_deref())?;
+
     // Mark code as used
     let _ = OAuthAuthorizationCodeRepository::mark_as_used(&state.db, auth_code.id).await;
 
     // Access token lifetime comes from the client's configured TTL (default 30d).
-    let client_ttl = OAuthClientRepository::find_by_id(&state.db, auth_code.client_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|c| c.access_token_ttl_seconds)
-        .unwrap_or(Some(DEFAULT_ACCESS_TOKEN_TTL_SECONDS));
+    let client_ttl = client.access_token_ttl_seconds;
     let (access_expires_at, access_expires_in) = access_token_expiry(client_ttl);
 
     // Generate access token
@@ -922,18 +997,28 @@ async fn refresh_access_token(
         ));
     }
 
+    // Authenticate the client the refresh token belongs to (client_id match +
+    // client_secret for confidential clients).
+    let client = OAuthClientRepository::find_by_id(&state.db, stored_token.client_id)
+        .await
+        .ok()
+        .flatten()
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(TokenErrorResponse {
+                error: "invalid_client".to_string(),
+                error_description: Some("Unknown client".to_string()),
+            }),
+        ))?;
+    verify_client_auth(&client, body.client_id.as_deref(), body.client_secret.as_deref())?;
+
     // Revoke old access token if it exists
     if let Some(access_token_id) = stored_token.access_token_id {
         let _ = OAuthAccessTokenRepository::revoke(&state.db, access_token_id).await;
     }
 
     // Access token lifetime comes from the client's configured TTL (default 30d).
-    let client_ttl = OAuthClientRepository::find_by_id(&state.db, stored_token.client_id)
-        .await
-        .ok()
-        .flatten()
-        .map(|c| c.access_token_ttl_seconds)
-        .unwrap_or(Some(DEFAULT_ACCESS_TOKEN_TTL_SECONDS));
+    let client_ttl = client.access_token_ttl_seconds;
     let (access_expires_at, access_expires_in) = access_token_expiry(client_ttl);
 
     // Generate new access token

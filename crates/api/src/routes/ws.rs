@@ -26,6 +26,34 @@ pub struct WsQuery {
     pub token: Option<String>,
 }
 
+/// Verify a WebSocket JWT and enforce revocation (individual token + user-wide, e.g.
+/// after logout). The WS handlers authenticate off the raw JWT and would otherwise keep
+/// working after logout until natural expiry — this mirrors the checks in the AuthUser
+/// extractor so revocation applies to sockets too.
+async fn verify_ws_token(state: &AppState, token: &str) -> Result<Uuid, (StatusCode, String)> {
+    let claims = state
+        .jwt
+        .verify_token(token)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+
+    let user_id = claims
+        .user_id()
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+
+    if mcp_auth::is_token_revoked(&state.redis, &claims.jti).await {
+        return Err((StatusCode::UNAUTHORIZED, "Token has been revoked".to_string()));
+    }
+    if let Some(revocation_time) =
+        mcp_auth::get_user_revocation_timestamp(&state.redis, &user_id.to_string()).await
+    {
+        if claims.iat <= revocation_time {
+            return Err((StatusCode::UNAUTHORIZED, "Token has been revoked".to_string()));
+        }
+    }
+
+    Ok(user_id)
+}
+
 /// WebSocket handler for deployment status updates
 pub async fn deployment_ws(
     ws: WebSocketUpgrade,
@@ -58,15 +86,8 @@ pub async fn deployment_ws(
         })
         .ok_or((StatusCode::UNAUTHORIZED, "Missing access token".to_string()))?;
 
-    // Verify JWT token
-    let claims = state
-        .jwt
-        .verify_token(&token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
-
-    let user_id = claims
-        .user_id()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+    // Verify JWT token (including revocation, e.g. after logout)
+    let user_id = verify_ws_token(&state, &token).await?;
 
     // Verify deployment exists and user has access with optimized query
     let access = DeploymentRepository::check_user_access(&state.db, deployment_id, user_id)
@@ -118,15 +139,8 @@ pub async fn server_status_ws(
         })
         .ok_or((StatusCode::UNAUTHORIZED, "Missing access token".to_string()))?;
 
-    // Verify JWT token
-    let claims = state
-        .jwt
-        .verify_token(&token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
-
-    let user_id = claims
-        .user_id()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+    // Verify JWT token (including revocation, e.g. after logout)
+    let user_id = verify_ws_token(&state, &token).await?;
 
     // Verify server exists, belongs to workspace, and user has access with optimized query
     let access = ServerRepository::check_user_access(&state.db, server_id, workspace_id, user_id)
@@ -178,15 +192,8 @@ pub async fn server_logs_ws(
         })
         .ok_or((StatusCode::UNAUTHORIZED, "Missing access token".to_string()))?;
 
-    // Verify JWT token
-    let claims = state
-        .jwt
-        .verify_token(&token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
-
-    let user_id = claims
-        .user_id()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+    // Verify JWT token (including revocation, e.g. after logout)
+    let user_id = verify_ws_token(&state, &token).await?;
 
     // Verify server exists, belongs to workspace, and user has access with optimized query
     let access = ServerRepository::check_user_access(&state.db, server_id, workspace_id, user_id)
@@ -239,15 +246,8 @@ pub async fn build_logs_ws(
         })
         .ok_or((StatusCode::UNAUTHORIZED, "Missing access token".to_string()))?;
 
-    // Verify JWT token
-    let claims = state
-        .jwt
-        .verify_token(&token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
-
-    let user_id = claims
-        .user_id()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token".to_string()))?;
+    // Verify JWT token (including revocation, e.g. after logout)
+    let user_id = verify_ws_token(&state, &token).await?;
 
     // Verify deployment exists and user has access with optimized query
     let access = DeploymentRepository::check_user_access(&state.db, deployment_id, user_id)

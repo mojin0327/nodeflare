@@ -179,6 +179,18 @@ pub async fn delete_wireguard_peer(
         ));
     }
 
+    // SECURITY: all workspaces share one Fly org, and peers are named
+    // `{workspace.slug}-...`. Enforce that the requested peer belongs to THIS workspace,
+    // otherwise an owner/admin of workspace A could delete workspace B's VPN peer by name
+    // (the `list` handler already filters by this same prefix).
+    let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
+        .await
+        .map_err(db_error)?
+        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+    if !peer_name.starts_with(&format!("{}-", workspace.slug)) {
+        return Err((StatusCode::NOT_FOUND, "Peer not found".to_string()));
+    }
+
     // Get Fly.io runtime
     let fly_runtime = state.fly_runtime.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,

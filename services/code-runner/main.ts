@@ -12,9 +12,41 @@
 // grants the execution's own scope.
 //
 // This service itself is trusted code; it runs with --allow-net (to serve) and
-// --allow-run=deno (to spawn the sandbox). It holds NO secrets.
+// --allow-run=deno (to spawn the sandbox).
+//
+// SECURITY: `/run` executes caller-supplied code AND lets the caller pick the sandbox's
+// only network-egress host (via `tools_endpoint`). It must therefore only ever be called
+// by the proxy. When `CODE_RUNNER_TOKEN` is set, every `/run` request must present it as
+// `Authorization: Bearer <token>`; the proxy sends the same value. Set it on both apps
+// (`fly secrets set CODE_RUNNER_TOKEN=... -a mcp-code-runner` and `-a mcp-cloud-proxy`).
 
 const SERVICE_PORT = Number(Deno.env.get("PORT") ?? "8080");
+
+// DoS guards for each sandbox (the VM is only ~1GB and runs many concurrently):
+//  - V8 old-space cap turns runaway allocation into a self-kill of that one sandbox
+//    instead of OOM-ing the whole runner VM.
+//  - Output cap bounds how much we buffer from a flooding sandbox.
+const MAX_HEAP_MB = Number(Deno.env.get("RUNNER_MAX_HEAP_MB") ?? "128");
+const MAX_OUTPUT_BYTES = Number(Deno.env.get("RUNNER_MAX_OUTPUT_BYTES") ?? String(4 * 1024 * 1024));
+
+// Shared secret required from the proxy. Empty = unauthenticated (logged loudly below).
+const RUN_TOKEN = Deno.env.get("CODE_RUNNER_TOKEN") ?? "";
+if (!RUN_TOKEN) {
+  console.error(
+    "[startup] WARNING: CODE_RUNNER_TOKEN is unset — /run is UNAUTHENTICATED. " +
+      "Set the same secret on this app and the proxy to lock it down.",
+  );
+}
+
+// Constant-time string comparison to avoid leaking the token via response timing.
+function safeEqual(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  if (ea.length !== eb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
+}
 
 interface RunRequest {
   code: string;
@@ -80,6 +112,42 @@ try {
 `;
 }
 
+// Drain a stream, but stop (and report) once it exceeds `maxBytes` so a flooding sandbox
+// can't grow this parent process's memory without bound.
+async function readCapped(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<{ data: Uint8Array; truncated: boolean }> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      total += value.length;
+      if (total > maxBytes) {
+        truncated = true;
+        break;
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch { /* ignore */ }
+  }
+  const data = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    data.set(c, off);
+    off += c.length;
+  }
+  return { data, truncated };
+}
+
 async function runSandboxed(req: RunRequest): Promise<{ output?: unknown; error?: string }> {
   const t0 = Date.now();
   let host: string;
@@ -97,7 +165,15 @@ async function runSandboxed(req: RunRequest): Promise<{ output?: unknown; error?
   );
 
   const command = new Deno.Command("deno", {
-    args: ["run", "--no-prompt", `--allow-net=${host}`, "-"],
+    // --v8-flags caps the sandbox's JS heap so runaway allocation self-kills instead of
+    // taking down the runner VM.
+    args: [
+      "run",
+      "--no-prompt",
+      `--v8-flags=--max-old-space-size=${MAX_HEAP_MB}`,
+      `--allow-net=${host}`,
+      "-",
+    ],
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
@@ -116,9 +192,28 @@ async function runSandboxed(req: RunRequest): Promise<{ output?: unknown; error?
     } catch { /* already exited */ }
   }, timeoutMs);
 
-  const { code: exitCode, stdout, stderr } = await child.output();
+  // Read stdout/stderr with a hard byte cap (DoS guard). If either floods past the cap we
+  // kill the sandbox rather than buffer it all in this parent process.
+  const [outR, errR] = await Promise.all([
+    readCapped(child.stdout, MAX_OUTPUT_BYTES),
+    readCapped(child.stderr, MAX_OUTPUT_BYTES),
+  ]);
+  if (outR.truncated || errR.truncated) {
+    try {
+      child.kill("SIGKILL");
+    } catch { /* already exited */ }
+  }
+  const status = await child.status;
   clearTimeout(timer);
+  const exitCode = status.code;
+  const stdout = outR.data;
+  const stderr = errR.data;
   const ms = Date.now() - t0;
+
+  if (outR.truncated) {
+    console.error(`[run] rejected: stdout exceeded ${MAX_OUTPUT_BYTES}B cap in ${ms}ms`);
+    return { error: `output exceeded ${MAX_OUTPUT_BYTES}-byte limit` };
+  }
 
   // Sandbox logs (user console.* + tool-call errors) land on stderr.
   const errText = new TextDecoder().decode(stderr).trim();
@@ -168,6 +263,11 @@ Deno.serve({ port: SERVICE_PORT, hostname: "::" }, async (req) => {
   }
   if (req.method === "POST" && url.pathname === "/run") {
     console.error("[run] request received");
+    // Require the shared secret when configured (fail-closed on mismatch).
+    if (RUN_TOKEN && !safeEqual(req.headers.get("authorization") ?? "", `Bearer ${RUN_TOKEN}`)) {
+      console.error("[run] rejected: missing/invalid runner token");
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
     let body: RunRequest;
     try {
       body = await req.json();

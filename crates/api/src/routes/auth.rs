@@ -511,8 +511,13 @@ async fn handle_github_link_callback(
         );
     }
 
-    // Redirect to frontend
-    let redirect_url = if let Some(return_to) = return_to {
+    // Redirect to frontend.
+    // SECURITY: `return_to` came from the client (stored unvalidated in the link CSRF
+    // value), so validate it the same way the login flow does before concatenating —
+    // otherwise `return_to=.evil.com` (no separator) redirects to an attacker host.
+    let validated_return_to =
+        return_to.as_deref().and_then(|rt| validate_return_to_url(rt, &state.config.server.frontend_url));
+    let redirect_url = if let Some(return_to) = validated_return_to {
         format!("{}{}?success=github_linked", state.config.server.frontend_url, return_to)
     } else {
         format!("{}/dashboard/settings/github?success=github_linked", state.config.server.frontend_url)

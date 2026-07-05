@@ -21,6 +21,8 @@ primary_region = "nrt"
   # Must exceed the sandbox wall-clock: this bounds both proxy->runner (the whole
   # run_code) and proxy->upstream (each heavy tool call). 30s (default) cut them short.
   PROXY_UPSTREAM_TIMEOUT_SECS = "90"
+  # DoS guard: max bytes buffered from a single (non-SSE) upstream response (10MB).
+  PROXY_MAX_UPSTREAM_RESPONSE_BYTES = "10485760"
 
 [http_service]
   internal_port = 8081
