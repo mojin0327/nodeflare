@@ -46,7 +46,15 @@ toml = "0.8"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "json"] }
 
 # Redis
-fred = { version = "8.0", features = ["enable-rustls"] }
+# fred 9.x upgrades rustls 0.21/0.22 -> 0.23 (rustls-webpki 0.103, fixes
+# RUSTSEC-2026-0049/0098/0099/0104). The Redis-prefix renames only land in 10.0,
+# so 9.x is source-compatible here. `enable-rustls-ring` keeps the pure-Rust ring
+# provider (consistent with sqlx tls-rustls-ring; no aws-lc-rs / C toolchain needed).
+# fred 9 gates commands behind granular `i-*` features; the default `i-std` set
+# covers KeysInterface but NOT scripting, so `i-scripts` is added back for
+# LuaInterface::eval (used by rate-limit / affinity Lua scripts). fred 8 bundled
+# these by default.
+fred = { version = "9.4", features = ["enable-rustls-ring", "i-scripts"] }
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
@@ -54,7 +62,9 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], defau
 # Auth
 jsonwebtoken = "9.3"
 argon2 = "0.5"
-oauth2 = "4.4"
+# NOTE: oauth2 crate removed — it was declared but unused (OAuth flows use raw
+# reqwest with hardcoded provider URLs). It pulled reqwest 0.11 -> rustls 0.21 ->
+# rustls-webpki 0.101.7 (RUSTSEC-2026-0098/0099/0104). Re-add as v5+ if ever needed.
 ring = "0.17"
 
 # Validation

@@ -8,7 +8,10 @@ mcp-common = { path = "../common" }
 
 tokio.workspace = true
 sqlx.workspace = true
-pgvector = { version = "0.4", features = ["sqlx"] }
+# Pinned: pgvector 0.4.2 switched to sqlx 0.9 in a patch release, which clashes
+# with the workspace's sqlx 0.8 (two sqlx-core versions -> Encode/Type mismatch).
+# Hold at 0.4.1 until the whole workspace moves to sqlx 0.9.
+pgvector = { version = "=0.4.1", features = ["sqlx"] }
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
