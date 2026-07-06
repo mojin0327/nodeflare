@@ -62,7 +62,9 @@ validator = { version = "0.19", features = ["derive"] }
 
 # Error handling
 thiserror = "2.0"
-anyhow = "1.0"
+# 1.0.103 patches RUSTSEC-2026-0190 (unsound Error::downcast_mut); floor pinned
+# because Cargo.lock is gitignored and cannot carry the resolved version.
+anyhow = "1.0.103"
 
 # Logging & tracing
 tracing = "0.1"
