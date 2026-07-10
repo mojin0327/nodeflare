@@ -471,10 +471,20 @@ fn create_router(state: Arc<AppState>) -> Router {
         .route("/oauth/register", axum::routing::post(routes::oauth::register_client))
         .layer(oauth_cors);
 
+    // Internal routes: accessible only via Fly 6PN, authenticated by NODEFLARE_SERVER_TOKEN.
+    // No CORS needed — called server-to-server by hosted MCP apps over the private network.
+    let internal_router = Router::new()
+        .route(
+            "/internal/mcp-token/:server_id",
+            axum::routing::get(routes::mcp_tokens::get_token)
+                .put(routes::mcp_tokens::put_token),
+        );
+
     // Merge routers
     let router = Router::new()
         .merge(main_router)
-        .merge(oauth_router);
+        .merge(oauth_router)
+        .merge(internal_router);
 
     // Apply rate limiting middleware conditionally
     let router = if rate_limit_enabled {

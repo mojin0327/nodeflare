@@ -24,6 +24,7 @@ pub mod test;
 pub mod oauth;
 pub mod stats;
 pub mod github_accounts;
+pub mod mcp_tokens;
 
 use axum::{routing::{get, post, patch, delete}, Router};
 use std::sync::Arc;

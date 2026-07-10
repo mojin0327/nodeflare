@@ -4,7 +4,7 @@ use apalis_redis::RedisStorage;
 use axum::{routing::get, Router};
 use mcp_auth::CryptoService;
 use mcp_common::{types::LogStream, AppConfig, EventPublisher};
-use mcp_db::{DeploymentRepository, ErrorHintRepository, NotificationSettingsRepository, RegionStatus, SecretRepository, ServerRegionRepository, ServerRepository, UpdateDeployment, UpdateServerRegion, UserPreferencesRepository, UserRepository, WorkspaceRepository};
+use mcp_db::{CreateSecret, DeploymentRepository, ErrorHintRepository, NotificationSettingsRepository, RegionStatus, SecretRepository, ServerRegionRepository, ServerRepository, UpdateDeployment, UpdateServerRegion, UserPreferencesRepository, UserRepository, WorkspaceRepository};
 use mcp_email::EmailService;
 use mcp_github::GitHubApp;
 use mcp_queue::{BuildJob, DeployJob, DestroyJob, JobQueue};
@@ -874,7 +874,7 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
         .await
         .unwrap_or_default();
 
-    let secrets: Vec<mcp_queue::SecretEnv> = encrypted_secrets
+    let mut secrets: Vec<mcp_queue::SecretEnv> = encrypted_secrets
         .into_iter()
         .filter_map(|secret| {
             ctx.crypto
@@ -887,6 +887,34 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                 })
         })
         .collect();
+
+    // Generate or rotate the per-server identity token used to authenticate
+    // the MCP server against NodeFlare's internal API (e.g. OAuth token storage).
+    let server_token = uuid::Uuid::new_v4().to_string();
+    match ctx.crypto.encrypt_string(&server_token) {
+        Ok((encrypted_value, nonce)) => {
+            if let Err(e) = SecretRepository::upsert(&ctx.db, CreateSecret {
+                server_id: job.server_id,
+                key: "_NODEFLARE_SERVER_TOKEN".to_string(),
+                encrypted_value,
+                nonce,
+            }).await {
+                tracing::warn!("Failed to persist NODEFLARE_SERVER_TOKEN for server {}: {}", job.server_id, e);
+            }
+        }
+        Err(e) => tracing::warn!("Failed to encrypt NODEFLARE_SERVER_TOKEN: {}", e),
+    }
+    secrets.push(mcp_queue::SecretEnv {
+        key: "NODEFLARE_SERVER_TOKEN".to_string(),
+        value: server_token,
+    });
+    // Expose NodeFlare's internal API URL so the MCP server can reach it over Fly 6PN.
+    let api_internal_url = std::env::var("NODEFLARE_API_INTERNAL_URL")
+        .unwrap_or_else(|_| "http://nodeflare-api.internal:8080".to_string());
+    secrets.push(mcp_queue::SecretEnv {
+        key: "NODEFLARE_API_INTERNAL_URL".to_string(),
+        value: api_internal_url,
+    });
 
     // Update to deploying status
     DeploymentRepository::update(

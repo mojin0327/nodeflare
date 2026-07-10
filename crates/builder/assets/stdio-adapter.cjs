@@ -24,6 +24,9 @@ const { URL } = require('url');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const MCP_PATH = process.env.MCP_PATH || '/mcp';
+// When set, non-MCP requests (e.g. OAuth callbacks) are proxied to the MCP child's
+// internal HTTP server on this port instead of returning 404.
+const OAUTH_CALLBACK_PORT = parseInt(process.env.OAUTH_CALLBACK_PORT || '0', 10);
 const REQUEST_TIMEOUT_MS = 30000;
 const KEEPALIVE_MS = 25000;
 
@@ -520,6 +523,23 @@ const server = http.createServer(async (req, res) => {
   if (path === '/' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', transport: 'stdio-adapter' }));
+    return;
+  }
+
+  // Proxy non-MCP paths to the MCP child's OAuth callback server when configured.
+  if (OAUTH_CALLBACK_PORT > 0) {
+    const proxyReq = http.request(
+      { hostname: '127.0.0.1', port: OAUTH_CALLBACK_PORT, path: req.url, method: req.method, headers: req.headers },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res, { end: true });
+      }
+    );
+    proxyReq.on('error', () => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'OAuth callback service unavailable' }));
+    });
+    req.pipe(proxyReq, { end: true });
     return;
   }
 

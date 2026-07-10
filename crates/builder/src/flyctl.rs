@@ -629,6 +629,14 @@ fn generate_fly_toml(app_name: &str, region: &str, runtime: &str, transport: &st
             })
     };
 
+    let oauth_env = if transport == "stdio" {
+        format!(
+            "\n  OAUTH_CALLBACK_PORT = \"9090\"\n  OAUTH_REDIRECT_BASE_URL = \"https://{app_name}.fly.dev\""
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"app = "{app_name}"
 primary_region = "{region}"
@@ -636,7 +644,7 @@ primary_region = "{region}"
 [build]
 
 [env]
-  PORT = "{internal_port}"
+  PORT = "{internal_port}"{oauth_env}
 
 [http_service]
   internal_port = {internal_port}
@@ -1370,16 +1378,13 @@ CMD ["./start.sh"]
 fn generate_python_install_deps(project: &ProjectStructure) -> String {
     // Priority: uv (if uv.lock exists) > pyproject.toml > requirements.txt
     if project.has_uv_lock {
-        // Use uv for faster dependency installation
-        r#"RUN pip install --no-cache-dir uv && uv sync --frozen"#.to_string()
+        r#"RUN pip install --no-cache-dir uv && uv sync --frozen && uv pip install keyrings.alt"#.to_string()
     } else if project.has_pyproject {
-        // Install from pyproject.toml using pip
-        r#"RUN pip install --no-cache-dir ."#.to_string()
+        r#"RUN pip install --no-cache-dir . keyrings.alt"#.to_string()
     } else if project.has_requirements_txt {
-        r#"RUN pip install --no-cache-dir -r requirements.txt"#.to_string()
+        r#"RUN pip install --no-cache-dir keyrings.alt -r requirements.txt"#.to_string()
     } else {
-        // No dependency file found, skip installation
-        "# No dependency file found".to_string()
+        r#"RUN pip install --no-cache-dir keyrings.alt"#.to_string()
     }
 }
 
