@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { McpServer, Deployment, Secret, AccessMode } from '@/types';
+import { McpServer, Deployment, Secret, AccessMode, UpstreamOAuthProvider } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { BuildLogsPanel } from '@/components/deployment/build-logs-panel';
 import { MemorySelect } from '@/components/servers/memory-select';
+import { Select } from '@/components/ui/select';
 import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import { DEFAULT_MEMORY_MB } from '@/lib/plans';
 import {
@@ -1249,8 +1250,13 @@ function SettingsTab({
   const [toolSchemaSlim, setToolSchemaSlim] = useState(server.tool_schema_slim ?? false);
   const [toolSearchMode, setToolSearchMode] = useState(server.tool_search_mode ?? false);
   const [toolCodeMode, setToolCodeMode] = useState(server.tool_code_mode ?? false);
+  const [upstreamOauthEnabled, setUpstreamOauthEnabled] = useState<boolean>(!!server.upstream_oauth_provider);
   const [upstreamOauthProvider, setUpstreamOauthProvider] = useState<string>(server.upstream_oauth_provider ?? '');
   const [upstreamOauthScopes, setUpstreamOauthScopes] = useState<string>((server.upstream_oauth_scopes ?? []).join(' '));
+  const [upstreamOauthAuthUrl, setUpstreamOauthAuthUrl] = useState<string>(server.upstream_oauth_authorization_url ?? '');
+  const [upstreamOauthTokenUrl, setUpstreamOauthTokenUrl] = useState<string>(server.upstream_oauth_token_url ?? '');
+  const [upstreamOauthClientId, setUpstreamOauthClientId] = useState<string>(server.upstream_oauth_client_id ?? '');
+  const [upstreamOauthClientSecret, setUpstreamOauthClientSecret] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
   // Plan limits cap which memory sizes are selectable (Free is limited to 256MB).
@@ -1262,9 +1268,15 @@ function SettingsTab({
   const currentPlan = workspaces?.find((w) => w.id === workspaceId)?.plan || 'free';
   const maxMemoryMb = plans?.find((p) => p.plan === currentPlan)?.limits.max_memory_mb ?? 256;
 
+  const { data: upstreamProviders = [] } = useQuery<UpstreamOAuthProvider[]>({
+    queryKey: ['upstream-oauth-providers'],
+    queryFn: () => api.get('/oauth/upstream-providers'),
+  });
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      const isCustomProvider = upstreamOauthProvider === 'custom';
       await api.patch(`/workspaces/${workspaceId}/servers/${server.id}`, {
         name,
         description: description || null,
@@ -1282,10 +1294,16 @@ function SettingsTab({
         tool_schema_slim: toolSchemaSlim,
         tool_search_mode: toolSearchMode,
         tool_code_mode: toolCodeMode,
-        upstream_oauth_provider: upstreamOauthProvider || null,
-        upstream_oauth_scopes: upstreamOauthProvider
+        upstream_oauth_provider: upstreamOauthEnabled && upstreamOauthProvider ? upstreamOauthProvider : null,
+        upstream_oauth_scopes: upstreamOauthEnabled && upstreamOauthProvider
           ? upstreamOauthScopes.split(/\s+/).filter(Boolean)
           : null,
+        upstream_oauth_authorization_url: upstreamOauthEnabled && isCustomProvider ? upstreamOauthAuthUrl || null : null,
+        upstream_oauth_token_url: upstreamOauthEnabled && isCustomProvider ? upstreamOauthTokenUrl || null : null,
+        upstream_oauth_client_id: upstreamOauthEnabled && isCustomProvider ? upstreamOauthClientId || null : null,
+        upstream_oauth_client_secret: upstreamOauthEnabled && isCustomProvider && upstreamOauthClientSecret
+          ? upstreamOauthClientSecret
+          : undefined,
       });
       // Refresh the list views (keyed with their own prefixes) and this server's detail.
       queryClient.invalidateQueries({ queryKey: ['servers-list'] });
@@ -1587,37 +1605,102 @@ function SettingsTab({
         </div>
 
         <div>
-          <Label className="block mb-2">{t('upstreamOauth.title')}</Label>
-          <p className="text-xs text-gray-500 mb-2">{t('upstreamOauth.description')}</p>
-          <div className="inline-flex p-0.5 bg-gray-200/60 rounded-[10px] border border-gray-200">
-            {(['', 'google', 'github'] as const).map((p) => (
-              <button
-                key={p || 'none'}
-                type="button"
-                onClick={() => {
-                  setUpstreamOauthProvider(p);
-                  if (!p) setUpstreamOauthScopes('');
-                }}
-                className={`px-2.5 py-1 text-xs font-medium rounded-[10px] transition-all ${
-                  upstreamOauthProvider === p
-                    ? 'bg-white text-gray-800 shadow border border-gray-100'
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                {p === '' ? t('upstreamOauth.providerNone') : p === 'google' ? t('upstreamOauth.providerGoogle') : t('upstreamOauth.providerGithub')}
-              </button>
-            ))}
+          <div className="flex items-center justify-between mb-2">
+            <Label className="block">{t('upstreamOauth.title')}</Label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={upstreamOauthEnabled}
+              onClick={() => {
+                setUpstreamOauthEnabled((v) => !v);
+                if (upstreamOauthEnabled) {
+                  setUpstreamOauthProvider('');
+                  setUpstreamOauthScopes('');
+                }
+              }}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                upstreamOauthEnabled ? 'bg-violet-600' : 'bg-gray-200'
+              }`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${upstreamOauthEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
+            </button>
           </div>
-          {upstreamOauthProvider && (
-            <div className="mt-3 space-y-1">
-              <Label className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
-              <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
-              <Input
-                value={upstreamOauthScopes}
-                onChange={(e) => setUpstreamOauthScopes(e.target.value)}
-                placeholder={t('upstreamOauth.scopesPlaceholder')}
-                className="bg-white font-mono text-xs mt-1"
-              />
+          <p className="text-xs text-gray-500 mb-3">{t('upstreamOauth.toggleHelp')}</p>
+
+          {upstreamOauthEnabled && (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs mb-1 block">{t('upstreamOauth.providerLabel')}</Label>
+                <Select
+                  value={upstreamOauthProvider}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setUpstreamOauthProvider(val);
+                    const preset = upstreamProviders.find((p) => p.name === val);
+                    if (preset && !preset.is_managed) {
+                      setUpstreamOauthAuthUrl('');
+                      setUpstreamOauthTokenUrl('');
+                    }
+                    if (preset) {
+                      setUpstreamOauthScopes(preset.default_scopes.join(' '));
+                    }
+                  }}
+                  className="bg-white text-sm"
+                >
+                  <option value="">{t('upstreamOauth.providerPlaceholder')}</option>
+                  {upstreamProviders.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.display_name}{p.is_managed ? '' : ' (Custom)'}
+                    </option>
+                  ))}
+                </Select>
+                {upstreamOauthProvider && (() => {
+                  const prov = upstreamProviders.find((p) => p.name === upstreamOauthProvider);
+                  return prov ? (
+                    <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${prov.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {prov.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+
+              {upstreamOauthProvider && (
+                <div className="space-y-1">
+                  <Label className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
+                  <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
+                  <Input
+                    value={upstreamOauthScopes}
+                    onChange={(e) => setUpstreamOauthScopes(e.target.value)}
+                    placeholder={t('upstreamOauth.scopesPlaceholder')}
+                    className="bg-white font-mono text-xs mt-1"
+                  />
+                </div>
+              )}
+
+              {upstreamOauthProvider === 'custom' && (
+                <div className="mt-3 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
+                  <p className="text-xs font-medium text-gray-700">{t('upstreamOauth.customSection')}</p>
+                  <div>
+                    <Label className="text-xs">{t('upstreamOauth.authUrlLabel')}</Label>
+                    <Input type="url" placeholder={t('upstreamOauth.authUrlPlaceholder')} value={upstreamOauthAuthUrl} onChange={(e) => setUpstreamOauthAuthUrl(e.target.value)} className="mt-1 bg-white font-mono text-xs" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">{t('upstreamOauth.tokenUrlLabel')}</Label>
+                    <Input type="url" placeholder={t('upstreamOauth.tokenUrlPlaceholder')} value={upstreamOauthTokenUrl} onChange={(e) => setUpstreamOauthTokenUrl(e.target.value)} className="mt-1 bg-white font-mono text-xs" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">{t('upstreamOauth.clientIdLabel')}</Label>
+                    <Input type="text" placeholder={t('upstreamOauth.clientIdPlaceholder')} value={upstreamOauthClientId} onChange={(e) => setUpstreamOauthClientId(e.target.value)} className="mt-1 bg-white font-mono text-xs" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">{t('upstreamOauth.clientSecretLabel')}</Label>
+                    <Input type="password" placeholder={server.upstream_oauth_client_id ? t('upstreamOauth.clientSecretHint') : t('upstreamOauth.clientSecretPlaceholder')} value={upstreamOauthClientSecret} onChange={(e) => setUpstreamOauthClientSecret(e.target.value)} className="mt-1 bg-white font-mono text-xs" />
+                    {server.upstream_oauth_client_id && (
+                      <p className="text-xs text-gray-400 mt-1">{t('upstreamOauth.clientSecretHint')}</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

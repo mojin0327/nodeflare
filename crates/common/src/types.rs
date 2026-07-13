@@ -539,10 +539,18 @@ pub struct CreateServerRequest {
     /// the API layer (same rules as the secrets endpoint).
     #[validate(length(max = 100))]
     pub env_vars: Option<Vec<SetSecretRequest>>,
-    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    /// Upstream OAuth provider name (matches upstream_oauth_providers.name, None = disabled).
     pub upstream_oauth_provider: Option<String>,
     /// Scopes to request from the upstream OAuth provider.
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    /// Custom provider only: OAuth2 authorization endpoint URL.
+    pub upstream_oauth_authorization_url: Option<String>,
+    /// Custom provider only: OAuth2 token endpoint URL.
+    pub upstream_oauth_token_url: Option<String>,
+    /// Custom provider only: OAuth2 client_id.
+    pub upstream_oauth_client_id: Option<String>,
+    /// Custom provider only: OAuth2 client_secret (write-only, never returned in responses).
+    pub upstream_oauth_client_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -579,10 +587,18 @@ pub struct UpdateServerRequest {
     pub tool_search_mode: Option<bool>,
     /// Expose run_code and execute AI-written code in a sandbox. None = unchanged.
     pub tool_code_mode: Option<bool>,
-    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    /// Upstream OAuth provider name (matches upstream_oauth_providers.name, None = disabled).
     pub upstream_oauth_provider: Option<String>,
     /// Scopes to request from the upstream OAuth provider.
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    /// Custom provider only: OAuth2 authorization endpoint URL.
+    pub upstream_oauth_authorization_url: Option<String>,
+    /// Custom provider only: OAuth2 token endpoint URL.
+    pub upstream_oauth_token_url: Option<String>,
+    /// Custom provider only: OAuth2 client_id.
+    pub upstream_oauth_client_id: Option<String>,
+    /// Custom provider only: OAuth2 client_secret (write-only, never returned in responses).
+    pub upstream_oauth_client_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -667,12 +683,28 @@ pub struct ServerResponse {
     pub tool_search_mode: bool,
     /// When true, the proxy exposes run_code and executes code in a sandbox.
     pub tool_code_mode: bool,
-    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    /// Upstream OAuth provider name (matches upstream_oauth_providers.name, None = disabled).
     pub upstream_oauth_provider: Option<String>,
     /// Scopes requested from the upstream OAuth provider.
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    /// Custom provider only: OAuth2 authorization endpoint URL.
+    pub upstream_oauth_authorization_url: Option<String>,
+    /// Custom provider only: OAuth2 token endpoint URL.
+    pub upstream_oauth_token_url: Option<String>,
+    /// Custom provider only: OAuth2 client_id (client_secret is write-only and never returned).
+    pub upstream_oauth_client_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamOAuthProviderResponse {
+    pub name: String,
+    pub display_name: String,
+    pub authorization_url: String,
+    pub token_url: String,
+    pub default_scopes: Vec<String>,
+    pub is_managed: bool,
 }
 
 /// Minimal server response for selection lists (only id and name)

@@ -55,10 +55,18 @@ pub struct McpServer {
     /// JavaScript against the tool catalog in a sandbox, returning only the final
     /// result. Requires a configured code runner; otherwise treated as false.
     pub tool_code_mode: bool,
-    /// Upstream OAuth provider required by this server ('google', 'github', NULL = none)
+    /// Upstream OAuth provider name (matches upstream_oauth_providers.name, NULL = none)
     pub upstream_oauth_provider: Option<String>,
     /// OAuth scopes to request from the upstream provider
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    /// Custom provider only: OAuth2 authorization endpoint URL
+    pub upstream_oauth_authorization_url: Option<String>,
+    /// Custom provider only: OAuth2 token endpoint URL
+    pub upstream_oauth_token_url: Option<String>,
+    /// Custom provider only: OAuth2 client_id
+    pub upstream_oauth_client_id: Option<String>,
+    /// Custom provider only: OAuth2 client_secret (sensitive, never returned in API responses)
+    pub upstream_oauth_client_secret: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -144,6 +152,10 @@ pub struct CreateServer {
     pub port: Option<i32>,
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    pub upstream_oauth_authorization_url: Option<String>,
+    pub upstream_oauth_token_url: Option<String>,
+    pub upstream_oauth_client_id: Option<String>,
+    pub upstream_oauth_client_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -169,4 +181,8 @@ pub struct UpdateServer {
     pub tool_code_mode: Option<bool>,
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Option<Vec<String>>,
+    pub upstream_oauth_authorization_url: Option<String>,
+    pub upstream_oauth_token_url: Option<String>,
+    pub upstream_oauth_client_id: Option<String>,
+    pub upstream_oauth_client_secret: Option<String>,
 }

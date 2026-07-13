@@ -42,3 +42,6 @@ pub use error_hint_repo::ErrorHintRepository;
 
 mod linked_github_repo;
 pub use linked_github_repo::LinkedGitHubAccountRepository;
+
+mod upstream_oauth_provider_repo;
+pub use upstream_oauth_provider_repo::UpstreamOAuthProviderRepository;

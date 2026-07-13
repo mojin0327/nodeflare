@@ -206,7 +206,7 @@ fn app_name_from_endpoint(endpoint_url: &str) -> Option<String> {
 /// that are within 5 days of expiry. Failures are logged but do not stop the loop.
 fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Client) {
     use mcp_db::ServerRepository;
-    use crate::routes::oauth::refresh_upstream_token;
+    use crate::routes::oauth::{refresh_upstream_token, resolve_credentials};
 
     let refresh_interval_secs: u64 = std::env::var("UPSTREAM_TOKEN_REFRESH_INTERVAL_SECS")
         .ok()
@@ -292,7 +292,15 @@ fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Cli
                     provider, server.id
                 );
 
-                match refresh_upstream_token(&http, &provider, &stored.refresh_token).await {
+                let creds = match resolve_credentials(&db_pool, &provider, &server).await {
+                    Ok(c) => c,
+                    Err((_, e)) => {
+                        tracing::warn!("Upstream token refresh: failed to resolve credentials for {} server {}: {}", provider, server.id, e);
+                        continue;
+                    }
+                };
+
+                match refresh_upstream_token(&http, &creds.token_url, &creds.client_id, &creds.client_secret, &stored.refresh_token).await {
                     Ok((new_access, new_refresh, expires_in)) => {
                         let new_expires_at = now + expires_in;
                         let new_refresh_token = new_refresh.unwrap_or(stored.refresh_token);

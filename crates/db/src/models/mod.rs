@@ -39,3 +39,6 @@ pub use error_hint::*;
 
 mod linked_github;
 pub use linked_github::*;
+
+mod upstream_oauth_provider;
+pub use upstream_oauth_provider::*;

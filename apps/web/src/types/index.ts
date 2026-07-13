@@ -60,12 +60,27 @@ export interface McpServer {
   tool_search_mode: boolean;
   /** When true, the proxy exposes run_code and executes AI-written code in a sandbox. */
   tool_code_mode: boolean;
-  /** Upstream OAuth provider required by this server ('google', 'github', null = none) */
+  /** Upstream OAuth provider name (matches upstream_oauth_providers catalog, null = disabled) */
   upstream_oauth_provider: string | null;
   /** OAuth scopes to request from the upstream provider */
   upstream_oauth_scopes: string[] | null;
+  /** Custom provider only: authorization endpoint URL */
+  upstream_oauth_authorization_url: string | null;
+  /** Custom provider only: token endpoint URL */
+  upstream_oauth_token_url: string | null;
+  /** Custom provider only: client_id (client_secret is write-only) */
+  upstream_oauth_client_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface UpstreamOAuthProvider {
+  name: string;
+  display_name: string;
+  authorization_url: string;
+  token_url: string;
+  default_scopes: string[];
+  is_managed: boolean;
 }
 
 /** Minimal server info for selection lists (only id, workspace_id, name) */

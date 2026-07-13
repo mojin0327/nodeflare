@@ -1079,19 +1079,131 @@ fn compute_code_challenge(code_verifier: &str) -> String {
 }
 
 // ====================
-// Upstream OAuth (Google Drive, GitHub, etc.)
+// Upstream OAuth (provider-agnostic)
 // ====================
 
 const UPSTREAM_STATE_PREFIX: &str = "upstream_oauth_state:";
 const UPSTREAM_STATE_TTL_SECS: i64 = 600; // 10 minutes
 
-// Upstream provider endpoints
-const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-
 #[derive(Debug, Deserialize)]
 pub struct UpstreamAuthorizeRequest {
     pub server_id: Uuid,
+}
+
+/// Upstream token response (standard OAuth2 JSON body).
+#[derive(Debug, Deserialize)]
+struct UpstreamTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    #[serde(default = "default_expires_in")]
+    expires_in: i64,
+}
+
+fn default_expires_in() -> i64 {
+    // Providers that don't return expires_in (e.g. GitHub OAuth Apps) have non-expiring tokens.
+    // Use 1 year as a safe ceiling so the refresh job effectively never runs for them.
+    365 * 24 * 3600
+}
+
+/// Resolve OAuth2 credentials for a provider.
+/// - Managed providers: reads env vars `{NAME_UPPER}_CLIENT_ID` / `{NAME_UPPER}_CLIENT_SECRET`.
+/// - Custom provider: reads per-server columns.
+pub struct ProviderCredentials {
+    pub authorization_url: String,
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+pub async fn resolve_credentials(
+    db: &mcp_db::DbPool,
+    provider_name: &str,
+    server: &mcp_db::McpServer,
+) -> Result<ProviderCredentials, (StatusCode, String)> {
+    use mcp_db::UpstreamOAuthProviderRepository;
+
+    let record = UpstreamOAuthProviderRepository::find_by_name(db, provider_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, format!("Unknown upstream OAuth provider: {}", provider_name)))?;
+
+    if !record.is_enabled {
+        return Err((StatusCode::BAD_REQUEST, format!("Provider '{}' is currently disabled", provider_name)));
+    }
+
+    if record.is_managed {
+        let env_prefix = provider_name.to_uppercase();
+        let client_id = std::env::var(format!("{}_CLIENT_ID", env_prefix))
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}_CLIENT_ID is not configured on this platform", env_prefix)))?;
+        let client_secret = std::env::var(format!("{}_CLIENT_SECRET", env_prefix))
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}_CLIENT_SECRET is not configured on this platform", env_prefix)))?;
+        Ok(ProviderCredentials {
+            authorization_url: record.authorization_url,
+            token_url: record.token_url,
+            client_id,
+            client_secret,
+        })
+    } else {
+        // Custom provider: credentials must be on the server record
+        let authorization_url = server.upstream_oauth_authorization_url.clone()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: authorization URL not set".to_string()))?;
+        let token_url = server.upstream_oauth_token_url.clone()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: token URL not set".to_string()))?;
+        let client_id = server.upstream_oauth_client_id.clone()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: client_id not set".to_string()))?;
+        let client_secret = server.upstream_oauth_client_secret.clone()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: client_secret not set".to_string()))?;
+        Ok(ProviderCredentials { authorization_url, token_url, client_id, client_secret })
+    }
+}
+
+/// Exchange or refresh an OAuth2 code/token against a token endpoint.
+/// Returns (access_token, refresh_token_if_any, expires_in_secs).
+async fn do_token_request(
+    http: &reqwest::Client,
+    token_url: &str,
+    params: &[(&str, &str)],
+) -> anyhow::Result<(String, Option<String>, i64)> {
+    let resp = http
+        .post(token_url)
+        .header("Accept", "application/json")
+        .form(params)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Token endpoint returned error: {}", body);
+    }
+
+    let token: UpstreamTokenResponse = resp.json().await?;
+    Ok((token.access_token, token.refresh_token, token.expires_in))
+}
+
+/// List enabled upstream OAuth providers.
+/// GET /api/v1/oauth/upstream-providers
+pub async fn list_upstream_providers(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<mcp_common::types::UpstreamOAuthProviderResponse>>, (StatusCode, String)> {
+    use mcp_db::UpstreamOAuthProviderRepository;
+
+    let providers = UpstreamOAuthProviderRepository::list_enabled(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let response = providers
+        .into_iter()
+        .map(|p| mcp_common::types::UpstreamOAuthProviderResponse {
+            name: p.name,
+            display_name: p.display_name,
+            authorization_url: p.authorization_url,
+            token_url: p.token_url,
+            default_scopes: p.default_scopes,
+            is_managed: p.is_managed,
+        })
+        .collect();
+
+    Ok(Json(response))
 }
 
 /// Initiate upstream OAuth for an MCP server.
@@ -1102,7 +1214,6 @@ pub async fn upstream_authorize(
     auth_user: AuthUser,
     Query(params): Query<UpstreamAuthorizeRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    // Load server and verify workspace membership
     let server = ServerRepository::find_by_id(&state.db, params.server_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -1113,18 +1224,20 @@ pub async fn upstream_authorize(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
         .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
 
-    let provider = server
+    let provider_name = server
         .upstream_oauth_provider
         .as_deref()
         .ok_or((StatusCode::BAD_REQUEST, "Server has no upstream OAuth provider configured".to_string()))?;
 
-    // Generate a nonce and store it in Redis so the callback can verify it
+    let creds = resolve_credentials(&state.db, provider_name, &server).await?;
+
+    // Store nonce in Redis so the callback can verify it
     let nonce = generate_token(24);
     let state_key = format!("{}{}", UPSTREAM_STATE_PREFIX, nonce);
     let state_value = serde_json::json!({
         "server_id": params.server_id,
         "user_id": auth_user.user_id,
-        "provider": provider,
+        "provider": provider_name,
     })
     .to_string();
 
@@ -1143,26 +1256,23 @@ pub async fn upstream_authorize(
         .unwrap_or_else(|_| format!("http://{}:{}", state.config.server.host, state.config.server.port));
     let callback_url = format!("{}/oauth/upstream-callback", api_url);
 
-    let redirect_url = match provider {
-        "google" => {
-            let client_id = std::env::var("GOOGLE_CLIENT_ID")
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_ID not configured".to_string()))?;
-            let scopes = server
-                .upstream_oauth_scopes
-                .as_deref()
-                .map(|s| s.join(" "))
-                .unwrap_or_else(|| "https://www.googleapis.com/auth/drive".to_string());
-            let callback_encoded: String = url::form_urlencoded::byte_serialize(callback_url.as_bytes()).collect();
-            let scopes_encoded: String = url::form_urlencoded::byte_serialize(scopes.as_bytes()).collect();
-            format!(
-                "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&access_type=offline&prompt=consent",
-                GOOGLE_AUTH_URL, client_id, callback_encoded, scopes_encoded, nonce
-            )
-        }
-        other => {
-            return Err((StatusCode::BAD_REQUEST, format!("Unsupported upstream OAuth provider: {}", other)));
-        }
-    };
+    let scopes = server
+        .upstream_oauth_scopes
+        .as_deref()
+        .map(|s| s.join(" "))
+        .unwrap_or_default();
+
+    let callback_encoded: String = url::form_urlencoded::byte_serialize(callback_url.as_bytes()).collect();
+    let scopes_encoded: String = url::form_urlencoded::byte_serialize(scopes.as_bytes()).collect();
+
+    // Build authorization URL. For Google we append offline access params for refresh tokens.
+    let mut redirect_url = format!(
+        "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
+        creds.authorization_url, creds.client_id, callback_encoded, scopes_encoded, nonce
+    );
+    if provider_name == "google" {
+        redirect_url.push_str("&access_type=offline&prompt=consent");
+    }
 
     Ok(Redirect::temporary(&redirect_url).into_response())
 }
@@ -1174,20 +1284,12 @@ pub struct UpstreamCallbackParams {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GoogleUpstreamTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: i64,
-}
-
-/// Receive upstream OAuth callback from Google/GitHub.
+/// Receive upstream OAuth callback.
 /// GET /oauth/upstream-callback
 pub async fn upstream_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<UpstreamCallbackParams>,
 ) -> Result<Response, (StatusCode, String)> {
-    // Surface provider errors clearly
     if let Some(err) = params.error {
         let frontend_url = state.config.server.frontend_url.clone();
         let redirect = format!("{}/dashboard?upstream_oauth_error={}", frontend_url, urlencoding::encode(&err));
@@ -1197,15 +1299,12 @@ pub async fn upstream_callback(
     let code = params.code.ok_or((StatusCode::BAD_REQUEST, "Missing code".to_string()))?;
     let nonce = params.state.ok_or((StatusCode::BAD_REQUEST, "Missing state".to_string()))?;
 
-    // Validate nonce against Redis
+    // Validate and consume nonce
     let state_key = format!("{}{}", UPSTREAM_STATE_PREFIX, nonce);
     let raw: Option<String> = fred::interfaces::KeysInterface::get(&state.redis, &state_key)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {}", e)))?;
-
     let state_json = raw.ok_or((StatusCode::BAD_REQUEST, "Invalid or expired state".to_string()))?;
-
-    // Delete nonce immediately (one-time use)
     let _: () = fred::interfaces::KeysInterface::del(&state.redis, &state_key)
         .await
         .unwrap_or(());
@@ -1220,54 +1319,44 @@ pub async fn upstream_callback(
     let payload: StatePayload = serde_json::from_str(&state_json)
         .map_err(|_| (StatusCode::BAD_REQUEST, "Corrupt state payload".to_string()))?;
 
+    let server = ServerRepository::find_by_id(&state.db, payload.server_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    let creds = resolve_credentials(&state.db, &payload.provider, &server).await?;
+
     let api_url = std::env::var("API_URL")
         .unwrap_or_else(|_| format!("http://{}:{}", state.config.server.host, state.config.server.port));
     let callback_url = format!("{}/oauth/upstream-callback", api_url);
 
-    // Exchange code for tokens based on provider
-    let (access_token, refresh_token, expires_in) = match payload.provider.as_str() {
-        "google" => {
-            let client_id = std::env::var("GOOGLE_CLIENT_ID")
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_ID not configured".to_string()))?;
-            let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_SECRET not configured".to_string()))?;
+    let (access_token, refresh_token_opt, expires_in) = do_token_request(
+        &state.http,
+        &creds.token_url,
+        &[
+            ("client_id", creds.client_id.as_str()),
+            ("client_secret", creds.client_secret.as_str()),
+            ("code", code.as_str()),
+            ("redirect_uri", callback_url.as_str()),
+            ("grant_type", "authorization_code"),
+        ],
+    )
+    .await
+    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Token exchange failed: {}", e)))?;
 
-            let resp = state.http
-                .post(GOOGLE_TOKEN_URL)
-                .form(&[
-                    ("client_id", client_id.as_str()),
-                    ("client_secret", client_secret.as_str()),
-                    ("code", code.as_str()),
-                    ("redirect_uri", callback_url.as_str()),
-                    ("grant_type", "authorization_code"),
-                ])
-                .send()
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Google token exchange failed: {}", e)))?;
-
-            if !resp.status().is_success() {
-                let body = resp.text().await.unwrap_or_default();
-                return Err((StatusCode::BAD_GATEWAY, format!("Google returned error: {}", body)));
-            }
-
-            let token_resp: GoogleUpstreamTokenResponse = resp
-                .json()
-                .await
-                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse Google token response: {}", e)))?;
-
-            let rt = token_resp.refresh_token.ok_or((
+    // Google always returns a refresh_token when prompt=consent&access_type=offline; other
+    // providers may not (e.g. GitHub OAuth Apps issue non-expiring tokens without refresh).
+    let refresh_token = match refresh_token_opt {
+        Some(rt) => rt,
+        None if payload.provider == "google" => {
+            return Err((
                 StatusCode::BAD_GATEWAY,
                 "Google did not return a refresh_token. Ensure prompt=consent and access_type=offline were set.".to_string(),
-            ))?;
-
-            (token_resp.access_token, rt, token_resp.expires_in)
+            ));
         }
-        other => {
-            return Err((StatusCode::BAD_REQUEST, format!("Unsupported provider: {}", other)));
-        }
+        None => String::new(), // non-expiring token; store empty string
     };
 
-    // Persist in Redis under the same key the stdio-adapter polls
     let expires_at = chrono::Utc::now().timestamp() + expires_in;
     let token_payload = serde_json::json!({
         "access_token": access_token,
@@ -1277,7 +1366,6 @@ pub async fn upstream_callback(
     .to_string();
 
     let redis_key = format!("mcp:oauth:{}", payload.server_id);
-    // TTL: add a generous buffer (token expires_in + 90 days for the refresh token)
     let ttl = expires_in + 90 * 24 * 3600;
     fred::interfaces::KeysInterface::set::<(), _, _>(
         &state.redis,
@@ -1292,49 +1380,38 @@ pub async fn upstream_callback(
 
     tracing::info!(
         "Upstream OAuth complete: server_id={}, provider={}",
-        payload.server_id,
-        payload.provider
+        payload.server_id, payload.provider
     );
 
-    // Redirect to the server's settings page so the user sees confirmation
     let frontend_url = state.config.server.frontend_url.clone();
     let redirect = format!("{}/dashboard/servers/{}", frontend_url, payload.server_id);
     Ok(Redirect::temporary(&redirect).into_response())
 }
 
-/// Refresh a single upstream token using its refresh_token.
+/// Refresh a single upstream token.
 /// Returns (new_access_token, new_refresh_token_if_rotated, expires_in_secs).
 pub async fn refresh_upstream_token(
     http: &reqwest::Client,
-    provider: &str,
+    token_url: &str,
+    client_id: &str,
+    client_secret: &str,
     refresh_token: &str,
 ) -> anyhow::Result<(String, Option<String>, i64)> {
-    match provider {
-        "google" => {
-            let client_id = std::env::var("GOOGLE_CLIENT_ID")?;
-            let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")?;
-
-            let resp = http
-                .post(GOOGLE_TOKEN_URL)
-                .form(&[
-                    ("client_id", client_id.as_str()),
-                    ("client_secret", client_secret.as_str()),
-                    ("refresh_token", refresh_token),
-                    ("grant_type", "refresh_token"),
-                ])
-                .send()
-                .await?;
-
-            if !resp.status().is_success() {
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("Google refresh failed: {}", body);
-            }
-
-            let token: GoogleUpstreamTokenResponse = resp.json().await?;
-            Ok((token.access_token, token.refresh_token, token.expires_in))
-        }
-        other => anyhow::bail!("Unsupported provider: {}", other),
+    if refresh_token.is_empty() {
+        // Token never expires (e.g. GitHub OAuth App); nothing to refresh
+        anyhow::bail!("no refresh_token stored; token does not expire");
     }
+    do_token_request(
+        http,
+        token_url,
+        &[
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token"),
+        ],
+    )
+    .await
 }
 
 // ====================

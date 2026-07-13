@@ -97,6 +97,9 @@ pub async fn list_all(
                 tool_code_mode: s.tool_code_mode,
                 upstream_oauth_provider: s.upstream_oauth_provider,
                 upstream_oauth_scopes: s.upstream_oauth_scopes,
+                upstream_oauth_authorization_url: s.upstream_oauth_authorization_url,
+                upstream_oauth_token_url: s.upstream_oauth_token_url,
+                upstream_oauth_client_id: s.upstream_oauth_client_id,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
             }
@@ -326,6 +329,9 @@ pub async fn list(
                 tool_code_mode: s.tool_code_mode,
                 upstream_oauth_provider: s.upstream_oauth_provider,
                 upstream_oauth_scopes: s.upstream_oauth_scopes,
+                upstream_oauth_authorization_url: s.upstream_oauth_authorization_url,
+                upstream_oauth_token_url: s.upstream_oauth_token_url,
+                upstream_oauth_client_id: s.upstream_oauth_client_id,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
             }
@@ -553,6 +559,10 @@ pub async fn create(
             port: body.port,
             upstream_oauth_provider: body.upstream_oauth_provider.clone(),
             upstream_oauth_scopes: body.upstream_oauth_scopes.clone(),
+            upstream_oauth_authorization_url: body.upstream_oauth_authorization_url.clone(),
+            upstream_oauth_token_url: body.upstream_oauth_token_url.clone(),
+            upstream_oauth_client_id: body.upstream_oauth_client_id.clone(),
+            upstream_oauth_client_secret: body.upstream_oauth_client_secret.clone(),
         },
     )
     .await
@@ -786,6 +796,9 @@ pub async fn create(
         tool_code_mode: server.tool_code_mode,
         upstream_oauth_provider: server.upstream_oauth_provider,
         upstream_oauth_scopes: server.upstream_oauth_scopes,
+        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
+        upstream_oauth_token_url: server.upstream_oauth_token_url,
+        upstream_oauth_client_id: server.upstream_oauth_client_id,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -840,6 +853,9 @@ pub async fn get(
         tool_code_mode: server.tool_code_mode,
         upstream_oauth_provider: server.upstream_oauth_provider,
         upstream_oauth_scopes: server.upstream_oauth_scopes,
+        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
+        upstream_oauth_token_url: server.upstream_oauth_token_url,
+        upstream_oauth_client_id: server.upstream_oauth_client_id,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -932,6 +948,10 @@ pub async fn update(
             tool_code_mode: body.tool_code_mode,
             upstream_oauth_provider: body.upstream_oauth_provider,
             upstream_oauth_scopes: body.upstream_oauth_scopes,
+            upstream_oauth_authorization_url: body.upstream_oauth_authorization_url,
+            upstream_oauth_token_url: body.upstream_oauth_token_url,
+            upstream_oauth_client_id: body.upstream_oauth_client_id,
+            upstream_oauth_client_secret: body.upstream_oauth_client_secret,
         },
     )
     .await?;
@@ -969,6 +989,9 @@ pub async fn update(
         tool_code_mode: server.tool_code_mode,
         upstream_oauth_provider: server.upstream_oauth_provider,
         upstream_oauth_scopes: server.upstream_oauth_scopes,
+        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
+        upstream_oauth_token_url: server.upstream_oauth_token_url,
+        upstream_oauth_client_id: server.upstream_oauth_client_id,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -1276,6 +1299,9 @@ pub async fn stop(
         tool_code_mode: server.tool_code_mode,
         upstream_oauth_provider: server.upstream_oauth_provider,
         upstream_oauth_scopes: server.upstream_oauth_scopes,
+        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
+        upstream_oauth_token_url: server.upstream_oauth_token_url,
+        upstream_oauth_client_id: server.upstream_oauth_client_id,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
