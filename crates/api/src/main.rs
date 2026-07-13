@@ -205,7 +205,6 @@ fn app_name_from_endpoint(endpoint_url: &str) -> Option<String> {
 /// Hourly background job: refresh upstream OAuth tokens (Google Drive, GitHub, etc.)
 /// that are within 5 days of expiry. Failures are logged but do not stop the loop.
 fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Client) {
-    use fred::interfaces::KeysInterface;
     use mcp_db::ServerRepository;
     use crate::routes::oauth::refresh_upstream_token;
 

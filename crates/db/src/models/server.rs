@@ -142,6 +142,8 @@ pub struct CreateServer {
     pub auth_enabled: bool,
     pub memory_mb: Option<i32>,
     pub port: Option<i32>,
+    pub upstream_oauth_provider: Option<String>,
+    pub upstream_oauth_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -113,6 +113,8 @@ export default function NewServerPage() {
     auth_enabled: true,
     memory_mb: DEFAULT_MEMORY_MB,
   });
+  const [upstreamOauthProvider, setUpstreamOauthProvider] = useState('');
+  const [upstreamOauthScopes, setUpstreamOauthScopes] = useState('');
   // Environment variables to provision at creation time (sent before the initial
   // deploy so the first build already has them). Stored as a simple key/value list.
   const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>([]);
@@ -355,6 +357,10 @@ export default function NewServerPage() {
     createMutation.mutate({
       ...formData,
       env_vars: env_vars.length > 0 ? env_vars : undefined,
+      upstream_oauth_provider: upstreamOauthProvider || undefined,
+      upstream_oauth_scopes: upstreamOauthProvider
+        ? upstreamOauthScopes.split(/\s+/).filter(Boolean)
+        : undefined,
     });
   };
 
@@ -737,6 +743,323 @@ export default function NewServerPage() {
                 </button>
               );
             })}
+          </div>
+        </section>
+
+        {/* Environment Variables */}
+        <section>
+          <div className="rounded-[10px] border border-input">
+            <button
+              type="button"
+              onClick={() => setEnvOpen((o) => !o)}
+              className="flex w-full items-center gap-1.5 p-4 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform ${envOpen ? 'rotate-90' : ''}`} />
+              {t('create.envVars')}
+            </button>
+            {envOpen && (
+            <div className="space-y-4 border-t border-input p-4">
+              {detecting && envVars.length === 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-[38px] w-1/3" />
+                    <Skeleton className="h-[38px] flex-1" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-[38px] w-1/3" />
+                    <Skeleton className="h-[38px] flex-1" />
+                  </div>
+                </div>
+              )}
+
+              {envVars.length > 0 && (
+                <div className="space-y-2">
+                  {envVars.map((env, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white w-1/3">
+                        <KeyRound className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <input
+                          type="text"
+                          value={env.key}
+                          onChange={(e) => updateEnvVar(index, 'key', e.target.value)}
+                          placeholder="API_KEY"
+                          className="flex-1 min-w-0 bg-transparent text-sm font-mono focus:outline-none"
+                        />
+                      </div>
+                      <input
+                        type="password"
+                        value={env.value}
+                        onChange={(e) => updateEnvVar(index, 'value', e.target.value)}
+                        placeholder={t('create.envVarsValuePlaceholder')}
+                        className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeEnvVar(index)}
+                        className="p-2 text-gray-400 hover:text-red-600 transition-colors flex-shrink-0"
+                        title={tCommon('delete')}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={addEnvVar}
+                className="flex items-center gap-2 text-sm text-violet-600 hover:text-violet-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                {t('create.envVarsAdd')}
+              </button>
+            </div>
+            )}
+          </div>
+        </section>
+
+        {/* Build & deploy settings */}
+        <section>
+          <div className="rounded-[10px] border border-input">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex w-full items-center gap-1.5 p-4 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+              {t('create.advancedSettings')}
+            </button>
+                {advancedOpen && (
+                <div className="space-y-4 border-t border-input p-4">
+                <div>
+                  <Label htmlFor="github_branch" className="text-xs">{t('create.branch')}</Label>
+                  <div className="relative mt-2 w-full sm:w-56">
+                    <GitBranch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <select
+                      id="github_branch"
+                      value={branchValue}
+                      onChange={(e) => setFormData(prev => ({ ...prev, github_branch: e.target.value }))}
+                      // First interaction triggers the lazy fetch of the full branch list.
+                      onMouseDown={() => setBranchMenuOpen(true)}
+                      onFocus={() => setBranchMenuOpen(true)}
+                      className="peer h-10 w-full appearance-none rounded-[10px] border border-input bg-background pl-9 pr-9 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      {branchOptions.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 transition-colors peer-focus:text-gray-600" />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs">{t('create.runtime')}</Label>
+                  {detecting ? (
+                    <div className="grid grid-cols-5 gap-3 mt-2">
+                      {runtimes.map((r) => (
+                        <Skeleton key={r.value} className="h-[86px]" />
+                      ))}
+                    </div>
+                  ) : (
+                  <div className="grid grid-cols-5 gap-3 mt-2">
+                    {runtimes.map((runtime) => {
+                      const isSelected = formData.runtime === runtime.value;
+                      return (
+                        <button
+                          key={runtime.value}
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, runtime: runtime.value as Runtime }))}
+                          className={`p-3 rounded-lg text-center transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-white border border-gray-100 shadow-lg scale-110 z-10'
+                              : 'bg-white border border-gray-50 opacity-40 hover:opacity-70'
+                          }`}
+                        >
+                          <div className={`${isSelected ? 'w-12 h-12' : 'w-10 h-10'} mx-auto mb-2 rounded-lg ${runtime.color} flex items-center justify-center text-white transition-all duration-200`}>
+                            {runtime.icon}
+                          </div>
+                          <span className={`text-xs font-medium ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{runtime.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-xs">{t('create.transport')}</Label>
+                  {detecting ? (
+                    <div className="flex flex-wrap gap-3 mt-2">
+                      <Skeleton className="h-[42px] w-44" />
+                      <Skeleton className="h-[42px] w-32" />
+                    </div>
+                  ) : (
+                  <div className="flex flex-wrap gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'sse' }))}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
+                        formData.transport === 'sse' ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <Globe className="w-4 h-4 text-[#323232]" />
+                      <span className="font-medium text-sm text-[#323232]">Streamable HTTP</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, transport: 'stdio', port: undefined }))}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 transition-colors ${
+                        formData.transport === 'stdio' ? 'bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <Terminal className="w-4 h-4 text-[#323232]" />
+                      <span className="font-medium text-sm text-[#323232]">STDIO</span>
+                    </button>
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="root_directory" className="text-xs">{t('create.rootDirectory')}</Label>
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Folder className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="root_directory"
+                      type="text"
+                      placeholder="packages/mcp-server"
+                      value={formData.root_directory || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, root_directory: e.target.value }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="mcp_path" className="text-xs">{t('create.mcpPath')}</Label>
+                  <div className={`mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input px-3 transition-colors ${
+                    formData.transport === 'stdio' ? 'bg-gray-100 cursor-not-allowed' : 'bg-background focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2'
+                  }`}>
+                    <Link className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="mcp_path"
+                      type="text"
+                      placeholder="/mcp"
+                      value={formData.transport === 'stdio' ? '/mcp' : (formData.mcp_path || '/mcp')}
+                      onChange={(e) => setFormData(prev => ({ ...prev, mcp_path: e.target.value }))}
+                      disabled={formData.transport === 'stdio'}
+                      className={`flex-1 bg-transparent text-sm focus:outline-none ${
+                        formData.transport === 'stdio' ? 'text-gray-500 cursor-not-allowed' : ''
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {formData.transport === 'sse' && (
+                  <div>
+                    <Label htmlFor="port" className="text-xs">{t('create.port')}</Label>
+                    {detecting ? (
+                    <Skeleton className="mt-2 h-10" />
+                    ) : (
+                    <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                      <Server className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      <input
+                        id="port"
+                        type="number"
+                        min={1}
+                        max={65535}
+                        placeholder={String(formData.runtime === 'python' ? 8000 : (formData.runtime === 'go' || formData.runtime === 'rust') ? 8080 : 3000)}
+                        value={formData.port ?? ''}
+                        onChange={(e) => setFormData(prev => ({
+                          ...prev,
+                          port: e.target.value === '' ? undefined : Number(e.target.value),
+                        }))}
+                        className="flex-1 bg-transparent text-sm focus:outline-none"
+                      />
+                    </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <Label htmlFor="entry_command" className="text-xs">{t('create.entryCommand')}</Label>
+                  {detecting ? (
+                  <Skeleton className="mt-2 h-10" />
+                  ) : (
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Terminal className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="entry_command"
+                      type="text"
+                      placeholder="python server.py"
+                      value={formData.entry_command || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, entry_command: e.target.value || undefined }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
+                    />
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="build_command" className="text-xs">{t('create.buildCommand')}</Label>
+                  {detecting ? (
+                  <Skeleton className="mt-2 h-10" />
+                  ) : (
+                  <div className="mt-2 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                    <Terminal className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <input
+                      id="build_command"
+                      type="text"
+                      placeholder="npm run build"
+                      value={formData.build_command || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, build_command: e.target.value || undefined }))}
+                      className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
+                    />
+                  </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-xs">{t('upstreamOauth.title')}</Label>
+                  <p className="text-xs text-gray-500 mt-1 mb-2">{t('upstreamOauth.description')}</p>
+                  <div className="inline-flex p-0.5 bg-gray-200/60 rounded-[10px] border border-gray-200">
+                    {(['', 'google', 'github'] as const).map((p) => (
+                      <button
+                        key={p || 'none'}
+                        type="button"
+                        onClick={() => {
+                          setUpstreamOauthProvider(p);
+                          if (!p) setUpstreamOauthScopes('');
+                        }}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-[10px] transition-all ${
+                          upstreamOauthProvider === p
+                            ? 'bg-white text-gray-800 shadow border border-gray-100'
+                            : 'text-gray-400 hover:bg-white/60 hover:text-gray-600'
+                        }`}
+                      >
+                        {p === '' ? t('upstreamOauth.providerNone') : p === 'google' ? t('upstreamOauth.providerGoogle') : t('upstreamOauth.providerGithub')}
+                      </button>
+                    ))}
+                  </div>
+                  {upstreamOauthProvider && (
+                    <div className="mt-3 space-y-1">
+                      <Label htmlFor="upstream_scopes" className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
+                      <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
+                      <div className="mt-1 flex items-center gap-2 h-10 w-full rounded-[10px] border border-input bg-background px-3 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 transition-colors">
+                        <input
+                          id="upstream_scopes"
+                          type="text"
+                          placeholder={t('upstreamOauth.scopesPlaceholder')}
+                          value={upstreamOauthScopes}
+                          onChange={(e) => setUpstreamOauthScopes(e.target.value)}
+                          className="flex-1 bg-transparent text-sm focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                </div>
+                )}
           </div>
         </section>
 

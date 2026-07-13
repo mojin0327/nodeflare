@@ -1249,6 +1249,8 @@ function SettingsTab({
   const [toolSchemaSlim, setToolSchemaSlim] = useState(server.tool_schema_slim ?? false);
   const [toolSearchMode, setToolSearchMode] = useState(server.tool_search_mode ?? false);
   const [toolCodeMode, setToolCodeMode] = useState(server.tool_code_mode ?? false);
+  const [upstreamOauthProvider, setUpstreamOauthProvider] = useState<string>(server.upstream_oauth_provider ?? '');
+  const [upstreamOauthScopes, setUpstreamOauthScopes] = useState<string>((server.upstream_oauth_scopes ?? []).join(' '));
   const [isSaving, setIsSaving] = useState(false);
 
   // Plan limits cap which memory sizes are selectable (Free is limited to 256MB).
@@ -1280,6 +1282,10 @@ function SettingsTab({
         tool_schema_slim: toolSchemaSlim,
         tool_search_mode: toolSearchMode,
         tool_code_mode: toolCodeMode,
+        upstream_oauth_provider: upstreamOauthProvider || null,
+        upstream_oauth_scopes: upstreamOauthProvider
+          ? upstreamOauthScopes.split(/\s+/).filter(Boolean)
+          : null,
       });
       // Refresh the list views (keyed with their own prefixes) and this server's detail.
       queryClient.invalidateQueries({ queryKey: ['servers-list'] });
@@ -1578,6 +1584,42 @@ function SettingsTab({
               {t('toolCode.off')}
             </button>
           </div>
+        </div>
+
+        <div>
+          <Label className="block mb-2">{t('upstreamOauth.title')}</Label>
+          <p className="text-xs text-gray-500 mb-2">{t('upstreamOauth.description')}</p>
+          <div className="inline-flex p-0.5 bg-gray-200/60 rounded-[10px] border border-gray-200">
+            {(['', 'google', 'github'] as const).map((p) => (
+              <button
+                key={p || 'none'}
+                type="button"
+                onClick={() => {
+                  setUpstreamOauthProvider(p);
+                  if (!p) setUpstreamOauthScopes('');
+                }}
+                className={`px-2.5 py-1 text-xs font-medium rounded-[10px] transition-all ${
+                  upstreamOauthProvider === p
+                    ? 'bg-white text-gray-800 shadow border border-gray-100'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                {p === '' ? t('upstreamOauth.providerNone') : p === 'google' ? t('upstreamOauth.providerGoogle') : t('upstreamOauth.providerGithub')}
+              </button>
+            ))}
+          </div>
+          {upstreamOauthProvider && (
+            <div className="mt-3 space-y-1">
+              <Label className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
+              <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
+              <Input
+                value={upstreamOauthScopes}
+                onChange={(e) => setUpstreamOauthScopes(e.target.value)}
+                placeholder={t('upstreamOauth.scopesPlaceholder')}
+                className="bg-white font-mono text-xs mt-1"
+              />
+            </div>
+          )}
         </div>
       </div>
 

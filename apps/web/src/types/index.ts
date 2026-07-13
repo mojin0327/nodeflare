@@ -60,6 +60,10 @@ export interface McpServer {
   tool_search_mode: boolean;
   /** When true, the proxy exposes run_code and executes AI-written code in a sandbox. */
   tool_code_mode: boolean;
+  /** Upstream OAuth provider required by this server ('google', 'github', null = none) */
+  upstream_oauth_provider: string | null;
+  /** OAuth scopes to request from the upstream provider */
+  upstream_oauth_scopes: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,6 +185,10 @@ export interface CreateServerRequest {
   port?: number;
   /** Environment variables (secrets) to provision before the initial deploy. */
   env_vars?: { key: string; value: string }[];
+  /** Upstream OAuth provider for this server ('google', 'github', undefined = none) */
+  upstream_oauth_provider?: string;
+  /** OAuth scopes to request from the upstream provider */
+  upstream_oauth_scopes?: string[];
 }
 
 export interface UpdateServerRequest {
@@ -202,6 +210,10 @@ export interface UpdateServerRequest {
   memory_mb?: number;
   /** Internal listening port for Streamable HTTP (SSE) servers. Omit to leave unchanged. */
   port?: number;
+  /** Upstream OAuth provider for this server ('google', 'github', null = remove) */
+  upstream_oauth_provider?: string | null;
+  /** OAuth scopes to request from the upstream provider */
+  upstream_oauth_scopes?: string[] | null;
 }
 
 export interface CreateAccessTokenRequest {

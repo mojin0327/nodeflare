@@ -234,6 +234,7 @@ pub async fn rollback(
         build_command: server.build_command,
         memory_mb: server.memory_mb,
         port: server.port,
+        upstream_oauth_provider: server.upstream_oauth_provider,
     };
 
     state

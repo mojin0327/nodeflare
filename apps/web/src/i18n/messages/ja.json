@@ -315,6 +315,16 @@
       "on": "有効",
       "off": "無効"
     },
+    "upstreamOauth": {
+      "title": "アップストリーム OAuth",
+      "description": "設定すると、MCPリクエストを処理する前に外部プロバイダー（Google Drive、GitHubなど）からユーザーが付与したアクセストークンが必要になります。ユーザーがOAuthフローで認可するまで、アダプターはすべてのリクエストをブロックします。",
+      "providerNone": "なし",
+      "providerGoogle": "Google",
+      "providerGithub": "GitHub",
+      "scopesLabel": "スコープ",
+      "scopesPlaceholder": "例: https://www.googleapis.com/auth/drive.readonly",
+      "scopesHelp": "プロバイダーに要求するOAuthスコープ（スペース区切り）。"
+    },
     "new": "新規サーバー",
     "list": "サーバー一覧",
     "empty": "サーバーがまだありません",

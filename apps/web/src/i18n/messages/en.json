@@ -315,6 +315,16 @@
       "on": "Enabled",
       "off": "Disabled"
     },
+    "upstreamOauth": {
+      "title": "Upstream OAuth",
+      "description": "When set, this server requires a user-granted access token from an external provider (e.g. Google Drive, GitHub) before it can serve MCP requests. The adapter blocks all calls until the user has authorized via the OAuth flow.",
+      "providerNone": "None",
+      "providerGoogle": "Google",
+      "providerGithub": "GitHub",
+      "scopesLabel": "Scopes",
+      "scopesPlaceholder": "e.g. https://www.googleapis.com/auth/drive.readonly",
+      "scopesHelp": "Space-separated OAuth scopes to request from the provider."
+    },
     "new": "New Server",
     "list": "Server List",
     "empty": "No servers yet",
