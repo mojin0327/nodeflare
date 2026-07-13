@@ -726,6 +726,9 @@ pub struct ProjectStructure {
     pub go_deps: Vec<String>,
     /// Detected Node package manager (npm vs pnpm), driving install/build commands.
     pub(crate) node_pm: NodePm,
+    /// Whether the Python project uses VCS-based versioning (setuptools-scm, hatch-vcs)
+    /// that requires SETUPTOOLS_SCM_PRETEND_VERSION to be set during Docker builds.
+    pub uses_vcs_versioning: bool,
 }
 
 impl ProjectStructure {
@@ -804,6 +807,10 @@ pub async fn detect_project_structure(source_dir: &Path) -> ProjectStructure {
     if structure.has_pyproject {
         if let Ok(content) = std::fs::read_to_string(source_dir.join("pyproject.toml")) {
             structure.python_script = parse_pyproject_script(&content);
+            structure.uses_vcs_versioning = content.contains("setuptools-scm")
+                || content.contains("setuptools_scm")
+                || content.contains("hatch-vcs")
+                || content.contains("hatchling.build.hooks.vcs");
         }
     }
     if source_dir.join("Cargo.toml").exists() {
@@ -1321,9 +1328,14 @@ CMD [{node_cmd}]
             // Optional custom build (e.g. a codegen/compile step) only when set.
             let build_step = optional_build_step(build_command);
             let python_cmd = python_default_cmd(project);
+            let vcs_env = if project.uses_vcs_versioning {
+                "ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0\n"
+            } else {
+                ""
+            };
             format!(r#"FROM {PYTHON_IMAGE}
 RUN apt-get update && apt-get install -y --no-install-recommends procps curl && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
+{vcs_env}WORKDIR /app
 COPY . .
 {install_deps}
 {build_step}EXPOSE {PYTHON_PORT}
@@ -1526,11 +1538,16 @@ CMD ["node", "stdio-adapter.cjs", {node_cmd}]
             let install_deps = generate_python_install_deps(project);
             // Optional custom build (e.g. a codegen/compile step) only when set.
             let build_step = optional_build_step(build_command);
+            let vcs_env = if project.uses_vcs_versioning {
+                "ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0\n"
+            } else {
+                ""
+            };
 
             format!(r#"FROM {PYTHON_IMAGE}
 # Install Node.js for the STDIO-to-SSE adapter
 RUN apt-get update && apt-get install -y --no-install-recommends procps curl nodejs npm && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
+{vcs_env}WORKDIR /app
 COPY . .
 {install_deps}
 {build_step}ENV PORT={PYTHON_PORT}

@@ -100,8 +100,12 @@ async fn main() -> Result<()> {
     tracing::info!("Request logs cleanup task started");
 
     // Start deployment timeout task
-    start_deployment_timeout_task(db_pool);
+    start_deployment_timeout_task(db_pool.clone());
     tracing::info!("Deployment timeout task started");
+
+    // Start upstream OAuth token refresh task
+    start_upstream_token_refresh_task(db_pool.clone(), state.http.clone());
+    tracing::info!("Upstream OAuth token refresh task started");
 
     // Build router
     let app = create_router(state);
@@ -196,6 +200,132 @@ fn app_name_from_endpoint(endpoint_url: &str) -> Option<String> {
     let host = host.split('/').next().unwrap_or(host);
     let label = host.split('.').next().unwrap_or(host);
     (!label.is_empty()).then(|| label.to_string())
+}
+
+/// Hourly background job: refresh upstream OAuth tokens (Google Drive, GitHub, etc.)
+/// that are within 5 days of expiry. Failures are logged but do not stop the loop.
+fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Client) {
+    use fred::interfaces::KeysInterface;
+    use mcp_db::ServerRepository;
+    use crate::routes::oauth::refresh_upstream_token;
+
+    let refresh_interval_secs: u64 = std::env::var("UPSTREAM_TOKEN_REFRESH_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3600); // default: 1 hour
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(refresh_interval_secs));
+        loop {
+            interval.tick().await;
+
+            let servers = match ServerRepository::list_running_with_upstream_oauth(&db_pool).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Upstream token refresh: failed to list servers: {}", e);
+                    continue;
+                }
+            };
+
+            // We need a Redis client for token reads/writes.
+            // Re-connect cheaply using the same URL from env.
+            let redis_url = match std::env::var("REDIS_URL") {
+                Ok(u) => u,
+                Err(_) => {
+                    tracing::warn!("Upstream token refresh: REDIS_URL not set, skipping");
+                    continue;
+                }
+            };
+            let redis_client = match redis::Client::open(redis_url.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Upstream token refresh: redis client error: {}", e);
+                    continue;
+                }
+            };
+            let mut conn = match redis_client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Upstream token refresh: redis connect error: {}", e);
+                    continue;
+                }
+            };
+
+            let now = chrono::Utc::now().timestamp();
+            const REFRESH_BEFORE_SECS: i64 = 5 * 24 * 3600; // 5 days
+
+            for server in servers {
+                let provider = match server.upstream_oauth_provider.as_deref() {
+                    Some(p) => p.to_string(),
+                    None => continue,
+                };
+
+                let redis_key = format!("mcp:oauth:{}", server.id);
+                let raw: Option<String> = match redis::AsyncCommands::get(&mut conn, &redis_key).await {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                let raw = match raw {
+                    Some(r) => r,
+                    None => continue, // no token stored yet; nothing to refresh
+                };
+
+                #[derive(serde::Deserialize)]
+                struct StoredToken {
+                    access_token: String,
+                    refresh_token: String,
+                    expires_at: i64,
+                }
+
+                let stored: StoredToken = match serde_json::from_str(&raw) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+
+                // Skip if not near expiry
+                if stored.expires_at - now > REFRESH_BEFORE_SECS {
+                    continue;
+                }
+
+                tracing::info!(
+                    "Upstream token refresh: refreshing {} token for server {}",
+                    provider, server.id
+                );
+
+                match refresh_upstream_token(&http, &provider, &stored.refresh_token).await {
+                    Ok((new_access, new_refresh, expires_in)) => {
+                        let new_expires_at = now + expires_in;
+                        let new_refresh_token = new_refresh.unwrap_or(stored.refresh_token);
+                        let payload = serde_json::json!({
+                            "access_token": new_access,
+                            "refresh_token": new_refresh_token,
+                            "expires_at": new_expires_at,
+                        })
+                        .to_string();
+                        let ttl = expires_in + 90 * 24 * 3600;
+                        let _: Result<(), _> = redis::AsyncCommands::set_ex(
+                            &mut conn,
+                            &redis_key,
+                            payload,
+                            ttl as u64,
+                        )
+                        .await;
+                        tracing::info!(
+                            "Upstream token refresh: refreshed {} for server {}",
+                            provider, server.id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Upstream token refresh: failed to refresh {} for server {}: {}",
+                            provider, server.id, e
+                        );
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Background task: every interval, sample each running server's *started* Fly machines

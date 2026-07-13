@@ -95,6 +95,8 @@ pub async fn list_all(
                 tool_schema_slim: s.tool_schema_slim,
                 tool_search_mode: s.tool_search_mode,
                 tool_code_mode: s.tool_code_mode,
+                upstream_oauth_provider: s.upstream_oauth_provider,
+                upstream_oauth_scopes: s.upstream_oauth_scopes,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
             }
@@ -322,6 +324,8 @@ pub async fn list(
                 tool_schema_slim: s.tool_schema_slim,
                 tool_search_mode: s.tool_search_mode,
                 tool_code_mode: s.tool_code_mode,
+                upstream_oauth_provider: s.upstream_oauth_provider,
+                upstream_oauth_scopes: s.upstream_oauth_scopes,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
             }
@@ -547,6 +551,8 @@ pub async fn create(
             auth_enabled: body.auth_enabled.unwrap_or(true),
             memory_mb: body.memory_mb,
             port: body.port,
+            upstream_oauth_provider: body.upstream_oauth_provider.clone(),
+            upstream_oauth_scopes: body.upstream_oauth_scopes.clone(),
         },
     )
     .await
@@ -778,6 +784,8 @@ pub async fn create(
         tool_schema_slim: server.tool_schema_slim,
         tool_search_mode: server.tool_search_mode,
         tool_code_mode: server.tool_code_mode,
+        upstream_oauth_provider: server.upstream_oauth_provider,
+        upstream_oauth_scopes: server.upstream_oauth_scopes,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -830,6 +838,8 @@ pub async fn get(
         tool_schema_slim: server.tool_schema_slim,
         tool_search_mode: server.tool_search_mode,
         tool_code_mode: server.tool_code_mode,
+        upstream_oauth_provider: server.upstream_oauth_provider,
+        upstream_oauth_scopes: server.upstream_oauth_scopes,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -920,6 +930,8 @@ pub async fn update(
             tool_schema_slim: body.tool_schema_slim,
             tool_search_mode: body.tool_search_mode,
             tool_code_mode: body.tool_code_mode,
+            upstream_oauth_provider: body.upstream_oauth_provider,
+            upstream_oauth_scopes: body.upstream_oauth_scopes,
         },
     )
     .await?;
@@ -955,6 +967,8 @@ pub async fn update(
         tool_schema_slim: server.tool_schema_slim,
         tool_search_mode: server.tool_search_mode,
         tool_code_mode: server.tool_code_mode,
+        upstream_oauth_provider: server.upstream_oauth_provider,
+        upstream_oauth_scopes: server.upstream_oauth_scopes,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))
@@ -1260,6 +1274,8 @@ pub async fn stop(
         tool_schema_slim: server.tool_schema_slim,
         tool_search_mode: server.tool_search_mode,
         tool_code_mode: server.tool_code_mode,
+        upstream_oauth_provider: server.upstream_oauth_provider,
+        upstream_oauth_scopes: server.upstream_oauth_scopes,
         created_at: server.created_at,
         updated_at: server.updated_at,
     }))

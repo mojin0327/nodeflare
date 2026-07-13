@@ -14,7 +14,7 @@ impl ServerRepository {
             r#"
             SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
                    github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             FROM mcp_servers
             WHERE id = $1
             "#,
@@ -35,7 +35,7 @@ impl ServerRepository {
             r#"
             SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
                    github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             FROM mcp_servers
             WHERE workspace_id = $1 AND slug = $2
             "#,
@@ -64,7 +64,7 @@ impl ServerRepository {
             r#"
             SELECT s.id, s.workspace_id, s.name, s.slug, s.description, s.github_repo, s.github_branch,
                    s.github_installation_id, s.runtime, s.visibility, s.access_mode, s.transport, s.status, s.endpoint_url,
-                   s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.created_at, s.updated_at
+                   s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.upstream_oauth_provider, s.upstream_oauth_scopes, s.created_at, s.updated_at
             FROM mcp_servers s
             JOIN workspaces w ON w.id = s.workspace_id
             WHERE w.slug = $1 AND s.slug = $2 AND s.status = 'running'
@@ -88,7 +88,7 @@ impl ServerRepository {
             r#"
             SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
                    github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             FROM mcp_servers
             WHERE workspace_id = $1
             ORDER BY created_at DESC
@@ -111,7 +111,7 @@ impl ServerRepository {
             r#"
             SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
                    github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             FROM mcp_servers
             WHERE status = 'running'
             LIMIT 5000
@@ -166,7 +166,7 @@ impl ServerRepository {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             RETURNING id, workspace_id, name, slug, description, github_repo, github_branch,
                       github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             "#,
         )
         .bind(data.workspace_id)
@@ -241,11 +241,13 @@ impl ServerRepository {
                 tool_schema_slim = COALESCE($18, tool_schema_slim),
                 tool_search_mode = COALESCE($19, tool_search_mode),
                 tool_code_mode = COALESCE($20, tool_code_mode),
+                upstream_oauth_provider = COALESCE($21, upstream_oauth_provider),
+                upstream_oauth_scopes = COALESCE($22, upstream_oauth_scopes),
                 updated_at = NOW()
             WHERE id = $1
             RETURNING id, workspace_id, name, slug, description, github_repo, github_branch,
                       github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -268,6 +270,8 @@ impl ServerRepository {
         .bind(data.tool_schema_slim)
         .bind(data.tool_search_mode)
         .bind(data.tool_code_mode)
+        .bind(&data.upstream_oauth_provider)
+        .bind(&data.upstream_oauth_scopes)
         .fetch_one(pool)
         .await?;
 
@@ -312,7 +316,7 @@ impl ServerRepository {
             r#"
             SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
                    github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, created_at, updated_at
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
             FROM mcp_servers
             WHERE status = 'deleting'
               AND updated_at < NOW() - ($1 * interval '1 minute')
@@ -381,7 +385,7 @@ impl ServerRepository {
                 s.id, s.workspace_id, s.name, s.slug, s.description,
                 s.github_repo, s.github_branch, s.github_installation_id,
                 s.runtime, s.visibility, s.access_mode, s.transport, s.status, s.endpoint_url,
-                s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.created_at, s.updated_at
+                s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.upstream_oauth_provider, s.upstream_oauth_scopes, s.created_at, s.updated_at
             FROM mcp_servers s
             INNER JOIN workspace_members wm ON s.workspace_id = wm.workspace_id
             WHERE wm.user_id = $1
@@ -460,6 +464,26 @@ impl ServerRepository {
             running_servers: row.1,
             total_workspaces: row.2,
         })
+    }
+
+    /// List running servers that have an upstream OAuth provider configured.
+    /// Used by the background token refresh job.
+    pub async fn list_running_with_upstream_oauth(pool: &PgPool) -> Result<Vec<McpServer>> {
+        let servers = sqlx::query_as::<_, McpServer>(
+            r#"
+            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
+                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
+                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, created_at, updated_at
+            FROM mcp_servers
+            WHERE status = 'running'
+              AND upstream_oauth_provider IS NOT NULL
+            LIMIT 5000
+            "#,
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(servers)
     }
 }
 

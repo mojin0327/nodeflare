@@ -39,6 +39,8 @@ pub struct BuildJob {
     /// Internal listening port for Streamable HTTP (SSE) servers. None = runtime default.
     /// Ignored for stdio transport (the adapter always owns its own port).
     pub port: Option<i32>,
+    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth)
+    pub upstream_oauth_provider: Option<String>,
 }
 
 impl BuildJob {
@@ -67,6 +69,7 @@ impl BuildJob {
             build_command: server.build_command.clone(),
             memory_mb: server.memory_mb,
             port: server.port,
+            upstream_oauth_provider: server.upstream_oauth_provider.clone(),
         }
     }
 }

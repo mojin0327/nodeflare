@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { useLocale } from 'next-intl';
 import { useAuth } from '@/hooks/use-auth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -10,8 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getApiErrorMessage } from '@/types';
-import { locales, localeNames, Locale } from '@/i18n/config';
-import { Settings, Edit, LogOut, AlertTriangle, Trash2, AlertCircle, XCircle, ChevronDown, Check, Github, ChevronRight } from 'lucide-react';
+import { LocaleSwitcher } from '@/components/locale-switcher';
+import { Edit, LogOut, AlertTriangle, Trash2, AlertCircle, XCircle, Github, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
 interface NotificationSettings {
@@ -24,16 +23,10 @@ interface NotificationSettings {
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tCommon = useTranslations('common');
-  const currentLocale = useLocale() as Locale;
   const { user, logout, refreshUser } = useAuth();
   const queryClient = useQueryClient();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState('');
-
-  const handleLanguageChange = (newLocale: Locale) => {
-    document.cookie = `locale=${newLocale};path=/;max-age=31536000`;
-    window.location.reload();
-  };
 
   // Profile editing state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -252,11 +245,10 @@ export default function SettingsPage() {
       </section>
 
       {/* Language Settings */}
-      <LanguageSettingsSection
-        currentLocale={currentLocale}
-        onLanguageChange={handleLanguageChange}
-        title={t('language.title')}
-      />
+      <section className="mb-8 sm:mb-10">
+        <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 sm:mb-4">{t('language.title')}</h2>
+        <LocaleSwitcher />
+      </section>
 
       {/* Sign Out */}
       <section className="mb-8 sm:mb-10">
@@ -380,76 +372,3 @@ function NotificationToggle({
   );
 }
 
-const localeFlags: Record<Locale, string> = {
-  ja: '🇯🇵',
-  en: '🇺🇸',
-};
-
-function LanguageSettingsSection({
-  currentLocale,
-  onLanguageChange,
-  title,
-}: {
-  currentLocale: Locale;
-  onLanguageChange: (locale: Locale) => void;
-  title: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSelect = (locale: Locale) => {
-    setIsOpen(false);
-    if (locale !== currentLocale) {
-      onLanguageChange(locale);
-    }
-  };
-
-  return (
-    <section className="mb-8 sm:mb-10">
-      <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 sm:mb-4">{title}</h2>
-
-      <div className="relative inline-block" ref={dropdownRef}>
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 hover:border-gray-300 bg-white transition-colors"
-        >
-          <span className="text-lg">{localeFlags[currentLocale]}</span>
-          <span className="font-medium text-gray-900">{localeNames[currentLocale]}</span>
-          <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-        </button>
-
-        {isOpen && (
-          <div className="absolute left-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-            {locales.map((locale) => (
-              <button
-                key={locale}
-                onClick={() => handleSelect(locale)}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                  currentLocale === locale
-                    ? 'bg-violet-50 text-violet-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                <span className="text-lg">{localeFlags[locale]}</span>
-                <span>{localeNames[locale]}</span>
-                {currentLocale === locale && (
-                  <Check className="w-4 h-4 ml-auto text-violet-600" />
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}

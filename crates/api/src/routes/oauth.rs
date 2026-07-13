@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Form, Json,
 };
+use fred::interfaces::KeysInterface;
 use std::net::SocketAddr;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
@@ -11,7 +12,7 @@ use mcp_auth::ApiKeyService;
 use mcp_common::types::WorkspaceRole;
 use mcp_db::{
     OAuthAccessTokenRepository, OAuthAuthorizationCodeRepository, OAuthClient, OAuthClientRepository,
-    OAuthRefreshTokenRepository, WorkspaceRepository,
+    OAuthRefreshTokenRepository, WorkspaceRepository, ServerRepository,
     CreateOAuthAccessToken, CreateOAuthAuthorizationCode, CreateOAuthClient,
     CreateOAuthRefreshToken,
 };
@@ -1075,6 +1076,265 @@ fn compute_code_challenge(code_verifier: &str) -> String {
     hasher.update(code_verifier.as_bytes());
     let result = hasher.finalize();
     URL_SAFE_NO_PAD.encode(&result)
+}
+
+// ====================
+// Upstream OAuth (Google Drive, GitHub, etc.)
+// ====================
+
+const UPSTREAM_STATE_PREFIX: &str = "upstream_oauth_state:";
+const UPSTREAM_STATE_TTL_SECS: i64 = 600; // 10 minutes
+
+// Upstream provider endpoints
+const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+#[derive(Debug, Deserialize)]
+pub struct UpstreamAuthorizeRequest {
+    pub server_id: Uuid,
+}
+
+/// Initiate upstream OAuth for an MCP server.
+/// The user must be authenticated and a member of the server's workspace.
+/// GET /oauth/upstream-authorize?server_id=...
+pub async fn upstream_authorize(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(params): Query<UpstreamAuthorizeRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    // Load server and verify workspace membership
+    let server = ServerRepository::find_by_id(&state.db, params.server_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+
+    let _ = WorkspaceRepository::get_member(&state.db, server.workspace_id, auth_user.user_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
+        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+
+    let provider = server
+        .upstream_oauth_provider
+        .as_deref()
+        .ok_or((StatusCode::BAD_REQUEST, "Server has no upstream OAuth provider configured".to_string()))?;
+
+    // Generate a nonce and store it in Redis so the callback can verify it
+    let nonce = generate_token(24);
+    let state_key = format!("{}{}", UPSTREAM_STATE_PREFIX, nonce);
+    let state_value = serde_json::json!({
+        "server_id": params.server_id,
+        "user_id": auth_user.user_id,
+        "provider": provider,
+    })
+    .to_string();
+
+    fred::interfaces::KeysInterface::set::<(), _, _>(
+        &state.redis,
+        &state_key,
+        state_value,
+        Some(fred::types::Expiration::EX(UPSTREAM_STATE_TTL_SECS)),
+        None,
+        false,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {}", e)))?;
+
+    let api_url = std::env::var("API_URL")
+        .unwrap_or_else(|_| format!("http://{}:{}", state.config.server.host, state.config.server.port));
+    let callback_url = format!("{}/oauth/upstream-callback", api_url);
+
+    let redirect_url = match provider {
+        "google" => {
+            let client_id = std::env::var("GOOGLE_CLIENT_ID")
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_ID not configured".to_string()))?;
+            let scopes = server
+                .upstream_oauth_scopes
+                .as_deref()
+                .map(|s| s.join(" "))
+                .unwrap_or_else(|| "https://www.googleapis.com/auth/drive".to_string());
+            let callback_encoded: String = url::form_urlencoded::byte_serialize(callback_url.as_bytes()).collect();
+            let scopes_encoded: String = url::form_urlencoded::byte_serialize(scopes.as_bytes()).collect();
+            format!(
+                "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&access_type=offline&prompt=consent",
+                GOOGLE_AUTH_URL, client_id, callback_encoded, scopes_encoded, nonce
+            )
+        }
+        other => {
+            return Err((StatusCode::BAD_REQUEST, format!("Unsupported upstream OAuth provider: {}", other)));
+        }
+    };
+
+    Ok(Redirect::temporary(&redirect_url).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpstreamCallbackParams {
+    pub code: Option<String>,
+    pub state: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleUpstreamTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: i64,
+}
+
+/// Receive upstream OAuth callback from Google/GitHub.
+/// GET /oauth/upstream-callback
+pub async fn upstream_callback(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<UpstreamCallbackParams>,
+) -> Result<Response, (StatusCode, String)> {
+    // Surface provider errors clearly
+    if let Some(err) = params.error {
+        let frontend_url = state.config.server.frontend_url.clone();
+        let redirect = format!("{}/dashboard?upstream_oauth_error={}", frontend_url, urlencoding::encode(&err));
+        return Ok(Redirect::temporary(&redirect).into_response());
+    }
+
+    let code = params.code.ok_or((StatusCode::BAD_REQUEST, "Missing code".to_string()))?;
+    let nonce = params.state.ok_or((StatusCode::BAD_REQUEST, "Missing state".to_string()))?;
+
+    // Validate nonce against Redis
+    let state_key = format!("{}{}", UPSTREAM_STATE_PREFIX, nonce);
+    let raw: Option<String> = fred::interfaces::KeysInterface::get(&state.redis, &state_key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {}", e)))?;
+
+    let state_json = raw.ok_or((StatusCode::BAD_REQUEST, "Invalid or expired state".to_string()))?;
+
+    // Delete nonce immediately (one-time use)
+    let _: () = fred::interfaces::KeysInterface::del(&state.redis, &state_key)
+        .await
+        .unwrap_or(());
+
+    #[derive(serde::Deserialize)]
+    struct StatePayload {
+        server_id: Uuid,
+        #[allow(dead_code)]
+        user_id: Uuid,
+        provider: String,
+    }
+    let payload: StatePayload = serde_json::from_str(&state_json)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Corrupt state payload".to_string()))?;
+
+    let api_url = std::env::var("API_URL")
+        .unwrap_or_else(|_| format!("http://{}:{}", state.config.server.host, state.config.server.port));
+    let callback_url = format!("{}/oauth/upstream-callback", api_url);
+
+    // Exchange code for tokens based on provider
+    let (access_token, refresh_token, expires_in) = match payload.provider.as_str() {
+        "google" => {
+            let client_id = std::env::var("GOOGLE_CLIENT_ID")
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_ID not configured".to_string()))?;
+            let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "GOOGLE_CLIENT_SECRET not configured".to_string()))?;
+
+            let resp = state.http
+                .post(GOOGLE_TOKEN_URL)
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("client_secret", client_secret.as_str()),
+                    ("code", code.as_str()),
+                    ("redirect_uri", callback_url.as_str()),
+                    ("grant_type", "authorization_code"),
+                ])
+                .send()
+                .await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Google token exchange failed: {}", e)))?;
+
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err((StatusCode::BAD_GATEWAY, format!("Google returned error: {}", body)));
+            }
+
+            let token_resp: GoogleUpstreamTokenResponse = resp
+                .json()
+                .await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse Google token response: {}", e)))?;
+
+            let rt = token_resp.refresh_token.ok_or((
+                StatusCode::BAD_GATEWAY,
+                "Google did not return a refresh_token. Ensure prompt=consent and access_type=offline were set.".to_string(),
+            ))?;
+
+            (token_resp.access_token, rt, token_resp.expires_in)
+        }
+        other => {
+            return Err((StatusCode::BAD_REQUEST, format!("Unsupported provider: {}", other)));
+        }
+    };
+
+    // Persist in Redis under the same key the stdio-adapter polls
+    let expires_at = chrono::Utc::now().timestamp() + expires_in;
+    let token_payload = serde_json::json!({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": expires_at,
+    })
+    .to_string();
+
+    let redis_key = format!("mcp:oauth:{}", payload.server_id);
+    // TTL: add a generous buffer (token expires_in + 90 days for the refresh token)
+    let ttl = expires_in + 90 * 24 * 3600;
+    fred::interfaces::KeysInterface::set::<(), _, _>(
+        &state.redis,
+        &redis_key,
+        token_payload,
+        Some(fred::types::Expiration::EX(ttl)),
+        None,
+        false,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Redis error: {}", e)))?;
+
+    tracing::info!(
+        "Upstream OAuth complete: server_id={}, provider={}",
+        payload.server_id,
+        payload.provider
+    );
+
+    // Redirect to the server's settings page so the user sees confirmation
+    let frontend_url = state.config.server.frontend_url.clone();
+    let redirect = format!("{}/dashboard/servers/{}", frontend_url, payload.server_id);
+    Ok(Redirect::temporary(&redirect).into_response())
+}
+
+/// Refresh a single upstream token using its refresh_token.
+/// Returns (new_access_token, new_refresh_token_if_rotated, expires_in_secs).
+pub async fn refresh_upstream_token(
+    http: &reqwest::Client,
+    provider: &str,
+    refresh_token: &str,
+) -> anyhow::Result<(String, Option<String>, i64)> {
+    match provider {
+        "google" => {
+            let client_id = std::env::var("GOOGLE_CLIENT_ID")?;
+            let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")?;
+
+            let resp = http
+                .post(GOOGLE_TOKEN_URL)
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("client_secret", client_secret.as_str()),
+                    ("refresh_token", refresh_token),
+                    ("grant_type", "refresh_token"),
+                ])
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Google refresh failed: {}", body);
+            }
+
+            let token: GoogleUpstreamTokenResponse = resp.json().await?;
+            Ok((token.access_token, token.refresh_token, token.expires_in))
+        }
+        other => anyhow::bail!("Unsupported provider: {}", other),
+    }
 }
 
 // ====================

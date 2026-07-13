@@ -55,6 +55,10 @@ pub struct McpServer {
     /// JavaScript against the tool catalog in a sandbox, returning only the final
     /// result. Requires a configured code runner; otherwise treated as false.
     pub tool_code_mode: bool,
+    /// Upstream OAuth provider required by this server ('google', 'github', NULL = none)
+    pub upstream_oauth_provider: Option<String>,
+    /// OAuth scopes to request from the upstream provider
+    pub upstream_oauth_scopes: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -161,4 +165,6 @@ pub struct UpdateServer {
     pub tool_schema_slim: Option<bool>,
     pub tool_search_mode: Option<bool>,
     pub tool_code_mode: Option<bool>,
+    pub upstream_oauth_provider: Option<String>,
+    pub upstream_oauth_scopes: Option<Vec<String>>,
 }

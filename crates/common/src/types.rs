@@ -539,6 +539,10 @@ pub struct CreateServerRequest {
     /// the API layer (same rules as the secrets endpoint).
     #[validate(length(max = 100))]
     pub env_vars: Option<Vec<SetSecretRequest>>,
+    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    pub upstream_oauth_provider: Option<String>,
+    /// Scopes to request from the upstream OAuth provider.
+    pub upstream_oauth_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -575,6 +579,10 @@ pub struct UpdateServerRequest {
     pub tool_search_mode: Option<bool>,
     /// Expose run_code and execute AI-written code in a sandbox. None = unchanged.
     pub tool_code_mode: Option<bool>,
+    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    pub upstream_oauth_provider: Option<String>,
+    /// Scopes to request from the upstream OAuth provider.
+    pub upstream_oauth_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -659,6 +667,10 @@ pub struct ServerResponse {
     pub tool_search_mode: bool,
     /// When true, the proxy exposes run_code and executes code in a sandbox.
     pub tool_code_mode: bool,
+    /// Upstream OAuth provider for this server ('google', 'github', None = no upstream OAuth).
+    pub upstream_oauth_provider: Option<String>,
+    /// Scopes requested from the upstream OAuth provider.
+    pub upstream_oauth_scopes: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

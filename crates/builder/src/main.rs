@@ -915,6 +915,18 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
         key: "NODEFLARE_API_INTERNAL_URL".to_string(),
         value: api_internal_url,
     });
+    // Expose the server's own UUID so the stdio-adapter can poll for upstream tokens.
+    secrets.push(mcp_queue::SecretEnv {
+        key: "SERVER_ID".to_string(),
+        value: job.server_id.to_string(),
+    });
+    // If the server requires upstream OAuth, tell the adapter which provider to use.
+    if let Some(ref provider) = job.upstream_oauth_provider {
+        secrets.push(mcp_queue::SecretEnv {
+            key: "OAUTH_PROVIDER".to_string(),
+            value: provider.clone(),
+        });
+    }
 
     // Update to deploying status
     DeploymentRepository::update(

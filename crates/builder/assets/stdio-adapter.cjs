@@ -27,6 +27,19 @@ const MCP_PATH = process.env.MCP_PATH || '/mcp';
 // When set, non-MCP requests (e.g. OAuth callbacks) are proxied to the MCP child's
 // internal HTTP server on this port instead of returning 404.
 const OAUTH_CALLBACK_PORT = parseInt(process.env.OAUTH_CALLBACK_PORT || '0', 10);
+
+// Upstream OAuth configuration. When OAUTH_PROVIDER is set, the adapter polls
+// NodeFlare's internal API for a token before starting the child process.
+// While polling (token not yet present) all MCP requests receive 401.
+const OAUTH_PROVIDER = process.env.OAUTH_PROVIDER || '';
+const SERVER_ID = process.env.SERVER_ID || '';
+const NODEFLARE_API_INTERNAL_URL = process.env.NODEFLARE_API_INTERNAL_URL || '';
+const NODEFLARE_SERVER_TOKEN = process.env.NODEFLARE_SERVER_TOKEN || '';
+
+// Interval at which the adapter checks Redis for a newly-issued upstream token.
+// Shorter while waiting (token absent), longer once the server is running.
+const POLL_INTERVAL_WAITING_MS = 30_000;  // 30 s  – fast recovery after user authorises
+const POLL_INTERVAL_RUNNING_MS  = 60_000; // 60 s  – periodic rotation detection
 const REQUEST_TIMEOUT_MS = 30000;
 const KEEPALIVE_MS = 25000;
 
@@ -73,6 +86,103 @@ for (const arg of commandArgs) {
 
 console.log(`[Adapter] Starting STDIO adapter for: ${command} ${commandArgs.join(' ')}`);
 console.log(`[Adapter] Listening on port ${PORT}, MCP path: ${MCP_PATH} (Streamable HTTP + legacy SSE)`);
+
+// ---------------------------------------------------------------------------
+// Upstream OAuth state
+// ---------------------------------------------------------------------------
+
+// Whether this adapter requires upstream OAuth. When true and no token is present
+// the adapter enters "needs-auth" mode: all MCP requests get 401 and a poller
+// waits for the token to appear in NodeFlare's Redis store.
+const NEEDS_UPSTREAM_OAUTH = Boolean(OAUTH_PROVIDER && SERVER_ID && NODEFLARE_API_INTERNAL_URL && NODEFLARE_SERVER_TOKEN);
+
+// Set to true once a valid upstream token has been retrieved and child started.
+let upstreamTokenReady = !NEEDS_UPSTREAM_OAUTH;
+
+// Current upstream token payload (refreshed by poller)
+let upstreamToken = null;
+
+// Fetch the stored upstream token from NodeFlare's internal API.
+// Returns the parsed payload or null.
+async function fetchUpstreamToken() {
+  if (!NEEDS_UPSTREAM_OAUTH) return null;
+  return new Promise((resolve) => {
+    const url = new URL(`/internal/mcp-token/${SERVER_ID}`, NODEFLARE_API_INTERNAL_URL);
+    const req = http.request(
+      { hostname: url.hostname, port: url.port || 80, path: url.pathname, method: 'GET',
+        headers: { Authorization: `Bearer ${NODEFLARE_SERVER_TOKEN}` } },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try { resolve(JSON.parse(body)); } catch { resolve(null); }
+          } else {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+// Inject token fields into process.env so the child MCP process inherits them.
+function applyTokenToEnv(token) {
+  if (!token) return;
+  switch (OAUTH_PROVIDER) {
+    case 'google':
+      process.env.GOOGLE_ACCESS_TOKEN  = token.access_token  || '';
+      process.env.GOOGLE_REFRESH_TOKEN = token.refresh_token || '';
+      process.env.GOOGLE_TOKEN_EXPIRY  = String(token.expires_at || '');
+      break;
+    case 'github':
+      process.env.GITHUB_TOKEN = token.access_token || '';
+      break;
+    default:
+      // Generic fallback: expose raw fields for unknown providers
+      process.env.UPSTREAM_ACCESS_TOKEN  = token.access_token  || '';
+      process.env.UPSTREAM_REFRESH_TOKEN = token.refresh_token || '';
+  }
+}
+
+// Start a background poller. When in "waiting" mode it polls every 30 s;
+// once a token is found it switches to 60 s to catch rotations.
+function startTokenPoller() {
+  if (!NEEDS_UPSTREAM_OAUTH) return;
+
+  async function poll() {
+    const token = await fetchUpstreamToken();
+    if (token && token.access_token) {
+      const wasReady = upstreamTokenReady;
+      upstreamToken = token;
+      upstreamTokenReady = true;
+      applyTokenToEnv(token);
+
+      if (!wasReady) {
+        // First time a token arrived: start the MCP child process.
+        console.log('[Adapter] Upstream token received, starting MCP child process.');
+        startMcpProcess();
+      }
+      // Schedule next check at the slow interval (token rotation detection)
+      setTimeout(poll, POLL_INTERVAL_RUNNING_MS);
+    } else {
+      if (upstreamTokenReady) {
+        // Token disappeared (revoked / expired and not refreshed yet). Go back to
+        // waiting mode so incoming requests get 401 instead of forwarding to a
+        // child that now has no valid credentials.
+        console.warn('[Adapter] Upstream token gone – switching back to needs-auth mode.');
+        upstreamTokenReady = false;
+        upstreamToken = null;
+      }
+      setTimeout(poll, POLL_INTERVAL_WAITING_MS);
+    }
+  }
+
+  // Start the first poll immediately
+  poll();
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -484,8 +594,10 @@ const server = http.createServer(async (req, res) => {
   // so Fly.io marks the machine unhealthy instead of routing traffic to a broken server
   // that would only return errors.
   if (path === '/health') {
+    // While waiting for the upstream token the adapter is intentionally "needs-auth";
+    // report healthy so Fly.io doesn't kill the machine (the 401 is expected, not a crash).
     const childAlive = !!mcpProcess && !mcpProcess.killed && mcpProcess.exitCode === null;
-    const healthy = childAlive && !restartGiveUp;
+    const healthy = (NEEDS_UPSTREAM_OAUTH && !upstreamTokenReady) || (childAlive && !restartGiveUp);
     res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -494,9 +606,30 @@ const server = http.createServer(async (req, res) => {
         childAlive,
         restartGiveUp,
         restartCount,
+        needsUpstreamOAuth: NEEDS_UPSTREAM_OAUTH && !upstreamTokenReady,
       })
     );
     return;
+  }
+
+  // When upstream OAuth is required but not yet authorised, return 401 for all MCP
+  // requests so Claude (the client) can discover the auth server and prompt the user.
+  if (NEEDS_UPSTREAM_OAUTH && !upstreamTokenReady) {
+    if (
+      (path === MCP_PATH || path === `${MCP_PATH}/message` || path === `${MCP_PATH}/sse`) &&
+      req.method !== 'OPTIONS'
+    ) {
+      res.writeHead(401, {
+        'Content-Type': 'application/json',
+        'WWW-Authenticate': 'Bearer',
+      });
+      res.end(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Upstream OAuth authorization required' },
+        id: null,
+      }));
+      return;
+    }
   }
 
   // GET stream: Streamable HTTP server->client stream (also serves legacy /sse).
@@ -547,10 +680,15 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-// Start the server and MCP process
+// Start the server and conditionally the MCP process
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[Adapter] HTTP server listening on 0.0.0.0:${PORT}`);
-  startMcpProcess();
+  if (NEEDS_UPSTREAM_OAUTH) {
+    console.log(`[Adapter] Upstream OAuth required (provider=${OAUTH_PROVIDER}). Polling for token before starting MCP child.`);
+    startTokenPoller();
+  } else {
+    startMcpProcess();
+  }
 });
 
 // Graceful shutdown

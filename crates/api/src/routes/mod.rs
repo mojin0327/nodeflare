@@ -293,6 +293,9 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // OAuth Authorization Code (called from frontend for logged-in users)
         .route("/oauth/client-info", get(oauth::client_info))
         .route("/oauth/authorize-code", post(oauth::authorize_code))
+        // Upstream OAuth (Google Drive, GitHub, etc.)
+        .route("/oauth/upstream-authorize", get(oauth::upstream_authorize))
+        .route("/oauth/upstream-callback", get(oauth::upstream_callback))
 }
 
 /// WebSocket router for real-time updates
