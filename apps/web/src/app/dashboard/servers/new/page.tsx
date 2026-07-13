@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { GitHubAccountSelector } from '@/components/github/GitHubAccountSelector';
 import { MemorySelect } from '@/components/servers/memory-select';
 import { Select } from '@/components/ui/select';
+import { ProviderSelect } from '@/components/servers/provider-select';
 import { DEFAULT_MEMORY_MB } from '@/lib/plans';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker, SiGithub } from 'react-icons/si';
@@ -452,8 +453,7 @@ export default function NewServerPage() {
     }
   };
 
-  const handleOauthProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
+  const handleOauthProviderChange = (val: string) => {
     setUpstreamOauthProvider(val);
     const preset = upstreamProviders.find((p) => p.name === val);
     if (preset && !preset.is_managed) {
@@ -754,14 +754,12 @@ export default function NewServerPage() {
                         <div className="mt-3 space-y-3">
                           <div>
                             <Label className="text-xs mb-1 block">{t('upstreamOauth.providerLabel')}</Label>
-                            <Select value={upstreamOauthProvider} onChange={handleOauthProviderChange} className="text-sm">
-                              <option value="">{t('upstreamOauth.providerPlaceholder')}</option>
-                              {upstreamProviders.map((p) => (
-                                <option key={p.name} value={p.name}>
-                                  {p.display_name}{p.is_managed ? '' : ' (Custom)'}
-                                </option>
-                              ))}
-                            </Select>
+                            <ProviderSelect
+                              value={upstreamOauthProvider}
+                              onChange={handleOauthProviderChange}
+                              providers={upstreamProviders}
+                              placeholder={t('upstreamOauth.providerPlaceholder')}
+                            />
                             {upstreamProviders.find((p) => p.name === upstreamOauthProvider) && (
                               <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${upstreamProviders.find((p) => p.name === upstreamOauthProvider)?.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
                                 {upstreamProviders.find((p) => p.name === upstreamOauthProvider)?.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}

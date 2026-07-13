@@ -29,6 +29,7 @@ import {
 import { BuildLogsPanel } from '@/components/deployment/build-logs-panel';
 import { MemorySelect } from '@/components/servers/memory-select';
 import { Select } from '@/components/ui/select';
+import { ProviderSelect } from '@/components/servers/provider-select';
 import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import { DEFAULT_MEMORY_MB } from '@/lib/plans';
 import {
@@ -1273,6 +1274,16 @@ function SettingsTab({
     queryFn: () => api.get('/oauth/upstream-providers'),
   });
 
+  const handleOauthProviderChange = (val: string) => {
+    setUpstreamOauthProvider(val);
+    const preset = upstreamProviders.find((p) => p.name === val);
+    if (preset && !preset.is_managed) {
+      setUpstreamOauthAuthUrl('');
+      setUpstreamOauthTokenUrl('');
+    }
+    if (preset) setUpstreamOauthScopes(preset.default_scopes.join(' '));
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -1631,37 +1642,17 @@ function SettingsTab({
             <div className="space-y-3">
               <div>
                 <Label className="text-xs mb-1 block">{t('upstreamOauth.providerLabel')}</Label>
-                <Select
+                <ProviderSelect
                   value={upstreamOauthProvider}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setUpstreamOauthProvider(val);
-                    const preset = upstreamProviders.find((p) => p.name === val);
-                    if (preset && !preset.is_managed) {
-                      setUpstreamOauthAuthUrl('');
-                      setUpstreamOauthTokenUrl('');
-                    }
-                    if (preset) {
-                      setUpstreamOauthScopes(preset.default_scopes.join(' '));
-                    }
-                  }}
-                  className="bg-white text-sm"
-                >
-                  <option value="">{t('upstreamOauth.providerPlaceholder')}</option>
-                  {upstreamProviders.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.display_name}{p.is_managed ? '' : ' (Custom)'}
-                    </option>
-                  ))}
-                </Select>
-                {upstreamOauthProvider && (() => {
-                  const prov = upstreamProviders.find((p) => p.name === upstreamOauthProvider);
-                  return prov ? (
-                    <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${prov.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {prov.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}
-                    </span>
-                  ) : null;
-                })()}
+                  onChange={handleOauthProviderChange}
+                  providers={upstreamProviders}
+                  placeholder={t('upstreamOauth.providerPlaceholder')}
+                />
+                {upstreamProviders.find((p) => p.name === upstreamOauthProvider) && (
+                  <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${upstreamProviders.find((p) => p.name === upstreamOauthProvider)?.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {upstreamProviders.find((p) => p.name === upstreamOauthProvider)?.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}
+                  </span>
+                )}
               </div>
 
               {upstreamOauthProvider && (
