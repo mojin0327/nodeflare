@@ -682,21 +682,25 @@ export default function NewServerPage() {
                   labelClassName="text-xs"
                 />
 
-                {/* Auth Enabled Toggle */}
-                <div className="pt-4 border-t border-gray-100">
-                  <div className="flex items-start gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs">{t('upstreamOauth.title')}</Label>
                     <button
                       type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, auth_enabled: !prev.auth_enabled }))}
-                      className={`mt-0.5 relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${
-                        formData.auth_enabled ? 'bg-violet-500' : 'bg-[#d1d5db]'
+                      role="switch"
+                      aria-checked={upstreamOauthEnabled}
+                      onClick={() => {
+                        setUpstreamOauthEnabled((v) => !v);
+                        if (upstreamOauthEnabled) {
+                          setUpstreamOauthProvider('');
+                          setUpstreamOauthScopes('');
+                        }
+                      }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                        upstreamOauthEnabled ? 'bg-violet-600' : 'bg-gray-200'
                       }`}
                     >
-                      <span
-                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${
-                          formData.auth_enabled ? 'left-[22px]' : 'left-0.5'
-                        }`}
-                      />
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${upstreamOauthEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
                     </button>
                     <div className="flex-1">
                       <Label className="text-xs cursor-pointer" onClick={() => setFormData(prev => ({ ...prev, auth_enabled: !prev.auth_enabled }))}>
@@ -708,6 +712,114 @@ export default function NewServerPage() {
                             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                             {t('create.authDisabledWarning')}
                           </p>
+                        </div>
+                      )}
+
+                {/* Upstream OAuth Toggle */}
+                <div className="pt-4 border-t border-gray-100">
+                  <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUpstreamOauthEnabled((v) => !v);
+                        if (upstreamOauthEnabled) {
+                          setUpstreamOauthProvider('');
+                          setUpstreamOauthScopes('');
+                        }
+                      }}
+                      className={`mt-0.5 relative w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                        upstreamOauthEnabled ? 'bg-violet-500' : 'bg-[#d1d5db]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                          upstreamOauthEnabled ? 'left-[22px]' : 'left-0.5'
+                        }`}
+                      />
+                    </button>
+                    <div className="flex-1">
+                      <Label className="text-xs cursor-pointer" onClick={() => {
+                        setUpstreamOauthEnabled((v) => !v);
+                        if (upstreamOauthEnabled) {
+                          setUpstreamOauthProvider('');
+                          setUpstreamOauthScopes('');
+                        }
+                      }}>
+                        {t('upstreamOauth.title')}
+                      </Label>
+                      <p className="text-xs text-gray-500">{t('upstreamOauth.toggleHelp')}</p>
+                      {upstreamOauthEnabled && (
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <Label className="text-xs mb-1 block">{t('upstreamOauth.providerLabel')}</Label>
+                            <Select
+                              value={upstreamOauthProvider}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUpstreamOauthProvider(val);
+                                const preset = upstreamProviders.find((p) => p.name === val);
+                                if (preset && !preset.is_managed) {
+                                  setUpstreamOauthAuthUrl('');
+                                  setUpstreamOauthTokenUrl('');
+                                }
+                                if (preset) {
+                                  setUpstreamOauthScopes(preset.default_scopes.join(' '));
+                                }
+                              }}
+                              className="text-sm"
+                            >
+                              <option value="">{t('upstreamOauth.providerPlaceholder')}</option>
+                              {upstreamProviders.map((p) => (
+                                <option key={p.name} value={p.name}>
+                                  {p.display_name}{p.is_managed ? '' : ' (Custom)'}
+                                </option>
+                              ))}
+                            </Select>
+                            {upstreamOauthProvider && (() => {
+                              const prov = upstreamProviders.find((p) => p.name === upstreamOauthProvider);
+                              return prov ? (
+                                <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${prov.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
+                                  {prov.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}
+                                </span>
+                              ) : null;
+                            })()}
+                          </div>
+
+                          {upstreamOauthProvider && (
+                            <div className="space-y-1">
+                              <Label className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
+                              <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
+                              <Input
+                                type="text"
+                                placeholder={t('upstreamOauth.scopesPlaceholder')}
+                                value={upstreamOauthScopes}
+                                onChange={(e) => setUpstreamOauthScopes(e.target.value)}
+                                className="font-mono text-xs mt-1"
+                              />
+                            </div>
+                          )}
+
+                          {upstreamOauthProvider === 'custom' && (
+                            <div className="mt-3 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
+                              <p className="text-xs font-medium text-gray-700">{t('upstreamOauth.customSection')}</p>
+                              <div>
+                                <Label className="text-xs">{t('upstreamOauth.authUrlLabel')}</Label>
+                                <Input type="url" placeholder={t('upstreamOauth.authUrlPlaceholder')} value={upstreamOauthAuthUrl} onChange={(e) => setUpstreamOauthAuthUrl(e.target.value)} className="mt-1 font-mono text-xs" />
+                              </div>
+                              <div>
+                                <Label className="text-xs">{t('upstreamOauth.tokenUrlLabel')}</Label>
+                                <Input type="url" placeholder={t('upstreamOauth.tokenUrlPlaceholder')} value={upstreamOauthTokenUrl} onChange={(e) => setUpstreamOauthTokenUrl(e.target.value)} className="mt-1 font-mono text-xs" />
+                              </div>
+                              <div>
+                                <Label className="text-xs">{t('upstreamOauth.clientIdLabel')}</Label>
+                                <Input type="text" placeholder={t('upstreamOauth.clientIdPlaceholder')} value={upstreamOauthClientId} onChange={(e) => setUpstreamOauthClientId(e.target.value)} className="mt-1 font-mono text-xs" />
+                              </div>
+                              <div>
+                                <Label className="text-xs">{t('upstreamOauth.clientSecretLabel')}</Label>
+                                <Input type="password" placeholder={t('upstreamOauth.clientSecretPlaceholder')} value={upstreamOauthClientSecret} onChange={(e) => setUpstreamOauthClientSecret(e.target.value)} className="mt-1 font-mono text-xs" />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1035,105 +1147,6 @@ export default function NewServerPage() {
                   )}
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-xs">{t('upstreamOauth.title')}</Label>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={upstreamOauthEnabled}
-                      onClick={() => {
-                        setUpstreamOauthEnabled((v) => !v);
-                        if (upstreamOauthEnabled) {
-                          setUpstreamOauthProvider('');
-                          setUpstreamOauthScopes('');
-                        }
-                      }}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
-                        upstreamOauthEnabled ? 'bg-violet-600' : 'bg-gray-200'
-                      }`}
-                    >
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${upstreamOauthEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-3">{t('upstreamOauth.toggleHelp')}</p>
-
-                  {upstreamOauthEnabled && (
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-xs mb-1 block">{t('upstreamOauth.providerLabel')}</Label>
-                        <Select
-                          value={upstreamOauthProvider}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setUpstreamOauthProvider(val);
-                            const preset = upstreamProviders.find((p) => p.name === val);
-                            if (preset && !preset.is_managed) {
-                              // custom: clear managed fields
-                              setUpstreamOauthAuthUrl('');
-                              setUpstreamOauthTokenUrl('');
-                            }
-                            if (preset) {
-                              setUpstreamOauthScopes(preset.default_scopes.join(' '));
-                            }
-                          }}
-                          className="text-sm"
-                        >
-                          <option value="">{t('upstreamOauth.providerPlaceholder')}</option>
-                          {upstreamProviders.map((p) => (
-                            <option key={p.name} value={p.name}>
-                              {p.display_name}{p.is_managed ? '' : ' (Custom)'}
-                            </option>
-                          ))}
-                        </Select>
-                        {upstreamOauthProvider && (() => {
-                          const prov = upstreamProviders.find((p) => p.name === upstreamOauthProvider);
-                          return prov ? (
-                            <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${prov.is_managed ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'}`}>
-                              {prov.is_managed ? t('upstreamOauth.managedBadge') : t('upstreamOauth.customBadge')}
-                            </span>
-                          ) : null;
-                        })()}
-                      </div>
-
-                      {upstreamOauthProvider && (
-                        <div className="space-y-1">
-                          <Label className="text-xs">{t('upstreamOauth.scopesLabel')}</Label>
-                          <p className="text-xs text-gray-500">{t('upstreamOauth.scopesHelp')}</p>
-                          <Input
-                            type="text"
-                            placeholder={t('upstreamOauth.scopesPlaceholder')}
-                            value={upstreamOauthScopes}
-                            onChange={(e) => setUpstreamOauthScopes(e.target.value)}
-                            className="font-mono text-xs mt-1"
-                          />
-                        </div>
-                      )}
-
-                      {upstreamOauthProvider === 'custom' && (
-                        <div className="mt-3 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
-                          <p className="text-xs font-medium text-gray-700">{t('upstreamOauth.customSection')}</p>
-                          <div>
-                            <Label className="text-xs">{t('upstreamOauth.authUrlLabel')}</Label>
-                            <Input type="url" placeholder={t('upstreamOauth.authUrlPlaceholder')} value={upstreamOauthAuthUrl} onChange={(e) => setUpstreamOauthAuthUrl(e.target.value)} className="mt-1 font-mono text-xs" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">{t('upstreamOauth.tokenUrlLabel')}</Label>
-                            <Input type="url" placeholder={t('upstreamOauth.tokenUrlPlaceholder')} value={upstreamOauthTokenUrl} onChange={(e) => setUpstreamOauthTokenUrl(e.target.value)} className="mt-1 font-mono text-xs" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">{t('upstreamOauth.clientIdLabel')}</Label>
-                            <Input type="text" placeholder={t('upstreamOauth.clientIdPlaceholder')} value={upstreamOauthClientId} onChange={(e) => setUpstreamOauthClientId(e.target.value)} className="mt-1 font-mono text-xs" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">{t('upstreamOauth.clientSecretLabel')}</Label>
-                            <Input type="password" placeholder={t('upstreamOauth.clientSecretPlaceholder')} value={upstreamOauthClientSecret} onChange={(e) => setUpstreamOauthClientSecret(e.target.value)} className="mt-1 font-mono text-xs" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
                 </div>
                 )}
           </div>
