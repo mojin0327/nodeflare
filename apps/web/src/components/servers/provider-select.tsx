@@ -1,28 +1,20 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Settings2 } from 'lucide-react';
-import { SiGoogle, SiGithub, SiSlack, SiNotion, SiLinear } from 'react-icons/si';
-import { FaMicrosoft } from 'react-icons/fa6';
-import { IconType } from 'react-icons';
+import { Icon, addCollection } from '@iconify/react';
+import logosData from '@iconify-json/logos/icons.json';
 import { cn } from '@/lib/utils';
 import { UpstreamOAuthProvider } from '@/types';
 
-const PROVIDER_ICONS: Record<string, IconType> = {
-  google: SiGoogle,
-  github: SiGithub,
-  microsoft: FaMicrosoft,
-  slack: SiSlack,
-  notion: SiNotion,
-  linear: SiLinear,
-};
+addCollection(logosData);
 
-const PROVIDER_COLORS: Record<string, string> = {
-  google: '#4285F4',
-  github: '#181717',
-  microsoft: '#00A4EF',
-  slack: '#4A154B',
-  notion: '#000000',
-  linear: '#5E6AD2',
+const PROVIDER_LOGO_ICONS: Record<string, string> = {
+  google: 'logos:google-icon',
+  github: 'logos:github-icon',
+  microsoft: 'logos:microsoft-icon',
+  slack: 'logos:slack-icon',
+  notion: 'logos:notion-icon',
+  linear: 'logos:linear-icon',
 };
 
 interface ProviderSelectProps {
@@ -34,9 +26,9 @@ interface ProviderSelectProps {
 }
 
 function ProviderIcon({ name }: { name: string }) {
-  const Icon = PROVIDER_ICONS[name];
-  if (!Icon) return <Settings2 className="w-4 h-4 flex-shrink-0 text-gray-400" />;
-  return <Icon className="w-4 h-4 flex-shrink-0" style={{ color: PROVIDER_COLORS[name] }} />;
+  const icon = PROVIDER_LOGO_ICONS[name];
+  if (!icon) return <Settings2 className="w-4 h-4 flex-shrink-0 text-gray-400" />;
+  return <Icon icon={icon} className="w-4 h-4 flex-shrink-0" />;
 }
 
 export function ProviderSelect({ value, onChange, providers, placeholder, className }: ProviderSelectProps) {
