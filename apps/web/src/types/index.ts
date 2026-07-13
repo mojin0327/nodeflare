@@ -200,10 +200,18 @@ export interface CreateServerRequest {
   port?: number;
   /** Environment variables (secrets) to provision before the initial deploy. */
   env_vars?: { key: string; value: string }[];
-  /** Upstream OAuth provider for this server ('google', 'github', undefined = none) */
+  /** Upstream OAuth provider for this server ('google', 'github', 'custom', undefined = none) */
   upstream_oauth_provider?: string;
   /** OAuth scopes to request from the upstream provider */
   upstream_oauth_scopes?: string[];
+  /** Custom provider: authorization endpoint URL */
+  upstream_oauth_authorization_url?: string;
+  /** Custom provider: token endpoint URL */
+  upstream_oauth_token_url?: string;
+  /** Custom provider: client ID */
+  upstream_oauth_client_id?: string;
+  /** Custom provider: client secret (write-only) */
+  upstream_oauth_client_secret?: string;
 }
 
 export interface UpdateServerRequest {
@@ -225,10 +233,18 @@ export interface UpdateServerRequest {
   memory_mb?: number;
   /** Internal listening port for Streamable HTTP (SSE) servers. Omit to leave unchanged. */
   port?: number;
-  /** Upstream OAuth provider for this server ('google', 'github', null = remove) */
+  /** Upstream OAuth provider for this server ('google', 'github', 'custom', null = remove) */
   upstream_oauth_provider?: string | null;
   /** OAuth scopes to request from the upstream provider */
   upstream_oauth_scopes?: string[] | null;
+  /** Custom provider: authorization endpoint URL */
+  upstream_oauth_authorization_url?: string | null;
+  /** Custom provider: token endpoint URL */
+  upstream_oauth_token_url?: string | null;
+  /** Custom provider: client ID */
+  upstream_oauth_client_id?: string | null;
+  /** Custom provider: client secret (write-only) */
+  upstream_oauth_client_secret?: string;
 }
 
 export interface CreateAccessTokenRequest {
