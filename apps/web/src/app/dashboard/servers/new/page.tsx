@@ -15,7 +15,7 @@ import { GitHubAccountSelector } from '@/components/github/GitHubAccountSelector
 import { MemorySelect } from '@/components/servers/memory-select';
 import { Select } from '@/components/ui/select';
 import { ProviderSelect } from '@/components/servers/provider-select';
-import { DEFAULT_MEMORY_MB } from '@/lib/plans';
+import { DEFAULT_MEMORY_MB, findPlanLimits } from '@/lib/plans';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker, SiGithub } from 'react-icons/si';
 import { useSetPageHeader } from '../../page-header';
@@ -80,8 +80,7 @@ export default function NewServerPage() {
     enabled: !!templateId,
     staleTime: Infinity,
   });
-  const currentPlan = activeWorkspace?.plan || 'free';
-  const maxMemoryMb = plans?.find((p) => p.plan === currentPlan)?.limits.max_memory_mb ?? 256;
+  const maxMemoryMb = findPlanLimits(plans, activeWorkspace?.plan)?.max_memory_mb ?? 256;
 
   // Linked GitHub accounts
   const { data: linkedAccounts, isLoading: accountsLoading } = useQuery<LinkedGitHubAccount[]>({

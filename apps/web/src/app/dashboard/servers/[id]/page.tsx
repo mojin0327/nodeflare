@@ -31,7 +31,7 @@ import { MemorySelect } from '@/components/servers/memory-select';
 import { Select } from '@/components/ui/select';
 import { ProviderSelect } from '@/components/servers/provider-select';
 import { JazzAvatar } from '@/components/ui/jazz-avatar';
-import { DEFAULT_MEMORY_MB } from '@/lib/plans';
+import { DEFAULT_MEMORY_MB, findPlanLimits } from '@/lib/plans';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1458,8 +1458,22 @@ function SettingsTab({
     queryFn: () => api.get('/billing/plans'),
   });
   const { workspaces } = useWorkspace();
-  const currentPlan = workspaces?.find((w) => w.id === workspaceId)?.plan || 'free';
-  const maxMemoryMb = plans?.find((p) => p.plan === currentPlan)?.limits.max_memory_mb ?? 256;
+  const maxMemoryMb = findPlanLimits(plans, workspaces?.find((w) => w.id === workspaceId)?.plan)?.max_memory_mb ?? 256;
+
+  const { data: upstreamProviders = [] } = useQuery<UpstreamOAuthProvider[]>({
+    queryKey: ['upstream-oauth-providers'],
+    queryFn: () => api.get('/oauth/upstream-providers'),
+  });
+
+  const handleOauthProviderChange = (val: string) => {
+    setUpstreamOauthProvider(val);
+    const preset = upstreamProviders.find((p) => p.name === val);
+    if (preset && !preset.is_managed) {
+      setUpstreamOauthAuthUrl('');
+      setUpstreamOauthTokenUrl('');
+    }
+    if (preset) setUpstreamOauthScopes(preset.default_scopes.join(' '));
+  };
 
   const { data: upstreamProviders = [] } = useQuery<UpstreamOAuthProvider[]>({
     queryKey: ['upstream-oauth-providers'],

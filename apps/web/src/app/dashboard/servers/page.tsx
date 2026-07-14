@@ -3,6 +3,7 @@
 import { useQueries } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
+import { findPlanLimits } from '@/lib/plans';
 import { McpServerList } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { mcpPublicUrl } from '@/lib/mcp-url';
@@ -45,7 +46,7 @@ export default function ServersPage() {
   const isErrorServers = serversQuery.isError;
 
   const currentWorkspace = activeWorkspace;
-  const currentPlanLimits = plans?.find(p => p.plan === (currentWorkspace?.plan || 'free'))?.limits;
+  const currentPlanLimits = findPlanLimits(plans, currentWorkspace?.plan);
   const maxServers = currentPlanLimits?.max_servers || 3;
   const currentServerCount = isErrorServers ? 0 : (servers?.length || 0);
   const isAtLimit = !isErrorServers && currentServerCount >= maxServers;

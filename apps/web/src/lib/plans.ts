@@ -159,6 +159,13 @@ export function getPlan(planId: string): PlanDefinition | undefined {
   return PLANS.find(p => p.plan === planId);
 }
 
+export function findPlanLimits<T extends { plan: string; limits: unknown }>(
+  plans: T[] | undefined,
+  currentPlan: string | undefined,
+): T['limits'] | undefined {
+  return plans?.find(p => p.plan === (currentPlan || 'free'))?.limits;
+}
+
 export function formatPrice(price: number | null): string {
   if (price === null) return '';
   return `¥${price.toLocaleString()}`;

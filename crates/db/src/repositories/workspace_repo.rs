@@ -4,6 +4,10 @@ use mcp_common::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+const WORKSPACE_COLS: &str = "id, name, slug, plan, owner_id, stripe_customer_id, \
+    stripe_subscription_id, stripe_region_subscription_item_id, subscription_status, \
+    current_period_end, auto_email_invoices, created_at, updated_at";
+
 pub struct WorkspaceRepository;
 
 impl WorkspaceRepository {
@@ -11,14 +15,10 @@ impl WorkspaceRepository {
     const MAX_WORKSPACES_PER_USER: i64 = 50;
     /// Maximum members per workspace
     const MAX_MEMBERS_PER_WORKSPACE: i64 = 200;
+
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Workspace>> {
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            SELECT id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id, stripe_region_subscription_item_id,
-                   subscription_status, current_period_end, auto_email_invoices, created_at, updated_at
-            FROM workspaces
-            WHERE id = $1
-            "#,
+            &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE id = $1"),
         )
         .bind(id)
         .fetch_optional(pool)
@@ -29,12 +29,7 @@ impl WorkspaceRepository {
 
     pub async fn find_by_slug(pool: &PgPool, slug: &str) -> Result<Option<Workspace>> {
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            SELECT id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id, stripe_region_subscription_item_id,
-                   subscription_status, current_period_end, auto_email_invoices, created_at, updated_at
-            FROM workspaces
-            WHERE slug = $1
-            "#,
+            &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE slug = $1"),
         )
         .bind(slug)
         .fetch_optional(pool)
@@ -69,13 +64,10 @@ impl WorkspaceRepository {
         let mut tx = pool.begin().await?;
 
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            INSERT INTO workspaces (name, slug, owner_id)
-            VALUES ($1, $2, $3)
-            RETURNING id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id,
-                      stripe_region_subscription_item_id, subscription_status, current_period_end,
-                      auto_email_invoices, created_at, updated_at
-            "#,
+            &format!(
+                "INSERT INTO workspaces (name, slug, owner_id) VALUES ($1, $2, $3) \
+                 RETURNING {WORKSPACE_COLS}"
+            ),
         )
         .bind(&data.name)
         .bind(&data.slug)
@@ -101,25 +93,13 @@ impl WorkspaceRepository {
     }
 
     pub async fn update(pool: &PgPool, id: Uuid, data: UpdateWorkspace) -> Result<Workspace> {
-        let plan_str = data.plan.map(|p| match p {
-            Plan::Free => "free",
-            Plan::Pro => "pro",
-            Plan::Team => "team",
-            Plan::Enterprise => "enterprise",
-        });
+        let plan_str = data.plan.as_ref().map(|p| p.as_str());
 
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            UPDATE workspaces
-            SET
-                name = COALESCE($2, name),
-                plan = COALESCE($3, plan),
-                updated_at = NOW()
-            WHERE id = $1
-            RETURNING id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id,
-                      stripe_region_subscription_item_id, subscription_status, current_period_end,
-                      auto_email_invoices, created_at, updated_at
-            "#,
+            &format!(
+                "UPDATE workspaces SET name = COALESCE($2, name), plan = COALESCE($3, plan), \
+                 updated_at = NOW() WHERE id = $1 RETURNING {WORKSPACE_COLS}"
+            ),
         )
         .bind(id)
         .bind(&data.name)
@@ -182,13 +162,6 @@ impl WorkspaceRepository {
 
     /// Update workspace plan
     pub async fn update_plan(pool: &PgPool, id: Uuid, plan: Plan) -> Result<()> {
-        let plan_str = match plan {
-            Plan::Free => "free",
-            Plan::Pro => "pro",
-            Plan::Team => "team",
-            Plan::Enterprise => "enterprise",
-        };
-
         sqlx::query(
             r#"
             UPDATE workspaces
@@ -199,7 +172,7 @@ impl WorkspaceRepository {
             "#,
         )
         .bind(id)
-        .bind(plan_str)
+        .bind(plan.as_str())
         .execute(pool)
         .await?;
 
@@ -254,12 +227,7 @@ impl WorkspaceRepository {
     /// Find workspace by Stripe customer ID
     pub async fn find_by_stripe_customer(pool: &PgPool, customer_id: &str) -> Result<Option<Workspace>> {
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            SELECT id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id, stripe_region_subscription_item_id,
-                   subscription_status, current_period_end, auto_email_invoices, created_at, updated_at
-            FROM workspaces
-            WHERE stripe_customer_id = $1
-            "#,
+            &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE stripe_customer_id = $1"),
         )
         .bind(customer_id)
         .fetch_optional(pool)
@@ -271,12 +239,7 @@ impl WorkspaceRepository {
     /// Find workspace by Stripe subscription ID
     pub async fn find_by_stripe_subscription(pool: &PgPool, subscription_id: &str) -> Result<Option<Workspace>> {
         let workspace = sqlx::query_as::<_, Workspace>(
-            r#"
-            SELECT id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id, stripe_region_subscription_item_id,
-                   subscription_status, current_period_end, auto_email_invoices, created_at, updated_at
-            FROM workspaces
-            WHERE stripe_subscription_id = $1
-            "#,
+            &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE stripe_subscription_id = $1"),
         )
         .bind(subscription_id)
         .fetch_optional(pool)
@@ -320,13 +283,6 @@ impl WorkspaceRepository {
         user_id: Uuid,
         role: WorkspaceRole,
     ) -> Result<WorkspaceMember> {
-        let role_str = match role {
-            WorkspaceRole::Owner => "owner",
-            WorkspaceRole::Admin => "admin",
-            WorkspaceRole::Member => "member",
-            WorkspaceRole::Viewer => "viewer",
-        };
-
         let member = sqlx::query_as::<_, WorkspaceMember>(
             r#"
             INSERT INTO workspace_members (workspace_id, user_id, role)
@@ -336,7 +292,7 @@ impl WorkspaceRepository {
         )
         .bind(workspace_id)
         .bind(user_id)
-        .bind(role_str)
+        .bind(role.as_str())
         .fetch_one(pool)
         .await?;
 
@@ -365,13 +321,6 @@ impl WorkspaceRepository {
         user_id: Uuid,
         role: WorkspaceRole,
     ) -> Result<Option<WorkspaceMember>> {
-        let role_str = match role {
-            WorkspaceRole::Owner => "owner",
-            WorkspaceRole::Admin => "admin",
-            WorkspaceRole::Member => "member",
-            WorkspaceRole::Viewer => "viewer",
-        };
-
         let member = sqlx::query_as::<_, WorkspaceMember>(
             r#"
             UPDATE workspace_members
@@ -382,7 +331,7 @@ impl WorkspaceRepository {
         )
         .bind(workspace_id)
         .bind(user_id)
-        .bind(role_str)
+        .bind(role.as_str())
         .fetch_optional(pool)
         .await?;
 
@@ -474,14 +423,10 @@ impl WorkspaceRepository {
 
     pub async fn list_owned_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<Workspace>> {
         let workspaces = sqlx::query_as::<_, Workspace>(
-            r#"
-            SELECT id, name, slug, plan, owner_id, stripe_customer_id, stripe_subscription_id, stripe_region_subscription_item_id,
-                   subscription_status, current_period_end, auto_email_invoices, created_at, updated_at
-            FROM workspaces
-            WHERE owner_id = $1
-            ORDER BY created_at DESC
-            LIMIT $2
-            "#,
+            &format!(
+                "SELECT {WORKSPACE_COLS} FROM workspaces WHERE owner_id = $1 \
+                 ORDER BY created_at DESC LIMIT $2"
+            ),
         )
         .bind(user_id)
         .bind(Self::MAX_WORKSPACES_PER_USER)

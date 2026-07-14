@@ -18,6 +18,25 @@ use crate::routes::helpers::{
 };
 use crate::state::AppState;
 
+fn to_deployment_response(d: mcp_db::Deployment) -> DeploymentResponse {
+    let status = d.status();
+    let build_duration_seconds = d.finished_at.map(|f| (f - d.started_at).num_seconds());
+    DeploymentResponse {
+        id: d.id,
+        server_id: d.server_id,
+        version: d.version,
+        commit_sha: d.commit_sha,
+        status,
+        error_message: d.error_message,
+        build_logs: d.build_logs,
+        started_at: d.started_at,
+        finished_at: d.finished_at,
+        created_at: d.started_at,
+        deployed_at: d.finished_at,
+        build_duration_seconds,
+    }
+}
+
 pub async fn list(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -43,24 +62,7 @@ pub async fn list(
 
     let response: Vec<DeploymentResponse> = deployments
         .into_iter()
-        .map(|d| {
-            let status = d.status();
-            let build_duration_seconds = d.finished_at.map(|f| (f - d.started_at).num_seconds());
-            DeploymentResponse {
-                id: d.id,
-                server_id: d.server_id,
-                version: d.version,
-                commit_sha: d.commit_sha,
-                status,
-                error_message: d.error_message,
-                build_logs: d.build_logs,
-                started_at: d.started_at,
-                finished_at: d.finished_at,
-                created_at: d.started_at,
-                deployed_at: d.finished_at,
-                build_duration_seconds,
-            }
-        })
+        .map(to_deployment_response)
         .collect();
 
     Ok(Json(response))
@@ -89,22 +91,7 @@ pub async fn get(
         return Err((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()));
     }
 
-    let status = deployment.status();
-    let build_duration_seconds = deployment.finished_at.map(|f| (f - deployment.started_at).num_seconds());
-    Ok(Json(DeploymentResponse {
-        id: deployment.id,
-        server_id: deployment.server_id,
-        version: deployment.version,
-        commit_sha: deployment.commit_sha,
-        status,
-        error_message: deployment.error_message,
-        build_logs: deployment.build_logs,
-        started_at: deployment.started_at,
-        finished_at: deployment.finished_at,
-        created_at: deployment.started_at,
-        deployed_at: deployment.finished_at,
-        build_duration_seconds,
-    }))
+    Ok(Json(to_deployment_response(deployment)))
 }
 
 #[derive(serde::Serialize)]
@@ -232,22 +219,7 @@ pub async fn rollback(
 
     tracing::info!("Rollback build job enqueued for deployment {}", deployment.id);
 
-    let status = deployment.status();
-    let build_duration_seconds = deployment.finished_at.map(|f| (f - deployment.started_at).num_seconds());
-    Ok(Json(DeploymentResponse {
-        id: deployment.id,
-        server_id: deployment.server_id,
-        version: deployment.version,
-        commit_sha: deployment.commit_sha,
-        status,
-        error_message: deployment.error_message,
-        build_logs: deployment.build_logs,
-        started_at: deployment.started_at,
-        finished_at: deployment.finished_at,
-        created_at: deployment.started_at,
-        deployed_at: deployment.finished_at,
-        build_duration_seconds,
-    }))
+    Ok(Json(to_deployment_response(deployment)))
 }
 
 /// Deployment usage stats response

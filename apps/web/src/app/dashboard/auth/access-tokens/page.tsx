@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useSetPageHeader } from '../../page-header';
 import { MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from '@/lib/utils';
+import { formatDate } from '@/lib/date-utils';
 
 export default function AccessTokensPage() {
   const t = useTranslations('accessTokens');
@@ -196,7 +197,7 @@ function AccessTokenRow({
     if (diffMins < 60) return `${diffMins}分前`;
     if (diffHours < 24) return `${diffHours}時間前`;
     if (diffDays < 7) return `${diffDays}日前`;
-    return date.toLocaleDateString();
+    return formatDate(date);
   };
 
   return (
@@ -223,7 +224,7 @@ function AccessTokenRow({
         <div className="flex items-center justify-between">
           <span className="font-medium text-gray-900">{token.name}</span>
           <div className="flex items-center gap-3 text-xs text-gray-400">
-            <span>{new Date(token.created_at).toLocaleDateString()}に作成</span>
+            <span>{formatDate(token.created_at)}に作成</span>
             {token.last_used_at && (
               <>
                 <span className="text-gray-300">•</span>

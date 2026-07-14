@@ -4,6 +4,24 @@ use mcp_common::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+const SERVER_COLS: &str = "id, workspace_id, name, slug, description, github_repo, \
+    github_branch, github_installation_id, runtime, visibility, access_mode, transport, \
+    status, endpoint_url, rate_limit_per_minute, region, root_directory, mcp_path, \
+    entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, \
+    tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, \
+    upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, \
+    upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, \
+    created_at, updated_at";
+
+const SERVER_COLS_S: &str = "s.id, s.workspace_id, s.name, s.slug, s.description, s.github_repo, \
+    s.github_branch, s.github_installation_id, s.runtime, s.visibility, s.access_mode, s.transport, \
+    s.status, s.endpoint_url, s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, \
+    s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, \
+    s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, \
+    s.upstream_oauth_provider, s.upstream_oauth_scopes, s.upstream_oauth_authorization_url, \
+    s.upstream_oauth_token_url, s.upstream_oauth_client_id, s.upstream_oauth_client_secret, \
+    s.created_at, s.updated_at";
+
 pub struct ServerRepository;
 
 impl ServerRepository {
@@ -11,13 +29,7 @@ impl ServerRepository {
     const MAX_SERVERS_PER_QUERY: i64 = 200;
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<McpServer>> {
         let server = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE id = $1
-            "#,
+            &format!("SELECT {SERVER_COLS} FROM mcp_servers WHERE id = $1"),
         )
         .bind(id)
         .fetch_optional(pool)
@@ -32,13 +44,7 @@ impl ServerRepository {
         slug: &str,
     ) -> Result<Option<McpServer>> {
         let server = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE workspace_id = $1 AND slug = $2
-            "#,
+            &format!("SELECT {SERVER_COLS} FROM mcp_servers WHERE workspace_id = $1 AND slug = $2"),
         )
         .bind(workspace_id)
         .bind(slug)
@@ -61,14 +67,11 @@ impl ServerRepository {
         server_slug: &str,
     ) -> Result<Option<McpServer>> {
         let server = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT s.id, s.workspace_id, s.name, s.slug, s.description, s.github_repo, s.github_branch,
-                   s.github_installation_id, s.runtime, s.visibility, s.access_mode, s.transport, s.status, s.endpoint_url,
-                   s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.upstream_oauth_provider, s.upstream_oauth_scopes, s.upstream_oauth_authorization_url, s.upstream_oauth_token_url, s.upstream_oauth_client_id, s.upstream_oauth_client_secret, s.created_at, s.updated_at
-            FROM mcp_servers s
-            JOIN workspaces w ON w.id = s.workspace_id
-            WHERE w.slug = $1 AND s.slug = $2 AND s.status = 'running'
-            "#,
+            &format!(
+                "SELECT {SERVER_COLS_S} FROM mcp_servers s \
+                 JOIN workspaces w ON w.id = s.workspace_id \
+                 WHERE w.slug = $1 AND s.slug = $2 AND s.status = 'running'"
+            ),
         )
         .bind(workspace_slug)
         .bind(server_slug)
@@ -85,15 +88,10 @@ impl ServerRepository {
         offset: i64,
     ) -> Result<Vec<McpServer>> {
         let servers = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE workspace_id = $1
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
+            &format!(
+                "SELECT {SERVER_COLS} FROM mcp_servers \
+                 WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+            ),
         )
         .bind(workspace_id)
         .bind(limit)
@@ -108,14 +106,7 @@ impl ServerRepository {
     /// usage sampler to know which apps to poll for active machine time.
     pub async fn list_running(pool: &PgPool) -> Result<Vec<McpServer>> {
         let servers = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE status = 'running'
-            LIMIT 5000
-            "#,
+            &format!("SELECT {SERVER_COLS} FROM mcp_servers WHERE status = 'running' LIMIT 5000"),
         )
         .fetch_all(pool)
         .await?;
@@ -158,17 +149,18 @@ impl ServerRepository {
         let fly_app_name = McpServer::new_fly_app_name(id);
 
         let server = sqlx::query_as::<_, McpServer>(
-            r#"
-            INSERT INTO mcp_servers (
-                workspace_id, name, slug, description, github_repo, github_branch,
-                github_installation_id, runtime, visibility, access_mode, transport, region, root_directory, mcp_path, entry_command, auth_enabled, build_command, memory_mb, id, fly_app_name, port,
-                upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
-            RETURNING id, workspace_id, name, slug, description, github_repo, github_branch,
-                      github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            "#,
+            &format!(
+                "INSERT INTO mcp_servers ( \
+                    workspace_id, name, slug, description, github_repo, github_branch, \
+                    github_installation_id, runtime, visibility, access_mode, transport, region, \
+                    root_directory, mcp_path, entry_command, auth_enabled, build_command, memory_mb, \
+                    id, fly_app_name, port, upstream_oauth_provider, upstream_oauth_scopes, \
+                    upstream_oauth_authorization_url, upstream_oauth_token_url, \
+                    upstream_oauth_client_id, upstream_oauth_client_secret \
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27) \
+                RETURNING {SERVER_COLS}"
+            ),
         )
         .bind(data.workspace_id)
         .bind(&data.name)
@@ -226,40 +218,36 @@ impl ServerRepository {
         });
 
         let server = sqlx::query_as::<_, McpServer>(
-            r#"
-            UPDATE mcp_servers
-            SET
-                name = COALESCE($2, name),
-                description = COALESCE($3, description),
-                github_branch = COALESCE($4, github_branch),
-                visibility = COALESCE($5, visibility),
-                access_mode = COALESCE($6, access_mode),
-                status = COALESCE($7, status),
-                endpoint_url = COALESCE($8, endpoint_url),
-                region = COALESCE($9, region),
-                root_directory = COALESCE($10, root_directory),
-                mcp_path = COALESCE($11, mcp_path),
-                entry_command = COALESCE($12, entry_command),
-                auth_enabled = COALESCE($13, auth_enabled),
-                build_command = COALESCE($14, build_command),
-                memory_mb = COALESCE($15, memory_mb),
-                port = COALESCE($16, port),
-                tool_list_filter_by_scope = COALESCE($17, tool_list_filter_by_scope),
-                tool_schema_slim = COALESCE($18, tool_schema_slim),
-                tool_search_mode = COALESCE($19, tool_search_mode),
-                tool_code_mode = COALESCE($20, tool_code_mode),
-                upstream_oauth_provider = COALESCE($21, upstream_oauth_provider),
-                upstream_oauth_scopes = COALESCE($22, upstream_oauth_scopes),
-                upstream_oauth_authorization_url = COALESCE($23, upstream_oauth_authorization_url),
-                upstream_oauth_token_url = COALESCE($24, upstream_oauth_token_url),
-                upstream_oauth_client_id = COALESCE($25, upstream_oauth_client_id),
-                upstream_oauth_client_secret = COALESCE($26, upstream_oauth_client_secret),
-                updated_at = NOW()
-            WHERE id = $1
-            RETURNING id, workspace_id, name, slug, description, github_repo, github_branch,
-                      github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                      rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            "#,
+            &format!(
+                "UPDATE mcp_servers SET \
+                    name = COALESCE($2, name), \
+                    description = COALESCE($3, description), \
+                    github_branch = COALESCE($4, github_branch), \
+                    visibility = COALESCE($5, visibility), \
+                    access_mode = COALESCE($6, access_mode), \
+                    status = COALESCE($7, status), \
+                    endpoint_url = COALESCE($8, endpoint_url), \
+                    region = COALESCE($9, region), \
+                    root_directory = COALESCE($10, root_directory), \
+                    mcp_path = COALESCE($11, mcp_path), \
+                    entry_command = COALESCE($12, entry_command), \
+                    auth_enabled = COALESCE($13, auth_enabled), \
+                    build_command = COALESCE($14, build_command), \
+                    memory_mb = COALESCE($15, memory_mb), \
+                    port = COALESCE($16, port), \
+                    tool_list_filter_by_scope = COALESCE($17, tool_list_filter_by_scope), \
+                    tool_schema_slim = COALESCE($18, tool_schema_slim), \
+                    tool_search_mode = COALESCE($19, tool_search_mode), \
+                    tool_code_mode = COALESCE($20, tool_code_mode), \
+                    upstream_oauth_provider = COALESCE($21, upstream_oauth_provider), \
+                    upstream_oauth_scopes = COALESCE($22, upstream_oauth_scopes), \
+                    upstream_oauth_authorization_url = COALESCE($23, upstream_oauth_authorization_url), \
+                    upstream_oauth_token_url = COALESCE($24, upstream_oauth_token_url), \
+                    upstream_oauth_client_id = COALESCE($25, upstream_oauth_client_id), \
+                    upstream_oauth_client_secret = COALESCE($26, upstream_oauth_client_secret), \
+                    updated_at = NOW() \
+                WHERE id = $1 RETURNING {SERVER_COLS}"
+            ),
         )
         .bind(id)
         .bind(&data.name)
@@ -328,15 +316,11 @@ impl ServerRepository {
         older_than_minutes: i64,
     ) -> Result<Vec<McpServer>> {
         let servers = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE status = 'deleting'
-              AND updated_at < NOW() - ($1 * interval '1 minute')
-            LIMIT 1000
-            "#,
+            &format!(
+                "SELECT {SERVER_COLS} FROM mcp_servers \
+                 WHERE status = 'deleting' AND updated_at < NOW() - ($1 * interval '1 minute') \
+                 LIMIT 1000"
+            ),
         )
         .bind(older_than_minutes)
         .fetch_all(pool)
@@ -395,18 +379,11 @@ impl ServerRepository {
         let effective_limit = limit.min(Self::MAX_SERVERS_PER_QUERY);
 
         let servers = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT DISTINCT
-                s.id, s.workspace_id, s.name, s.slug, s.description,
-                s.github_repo, s.github_branch, s.github_installation_id,
-                s.runtime, s.visibility, s.access_mode, s.transport, s.status, s.endpoint_url,
-                s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, s.upstream_oauth_provider, s.upstream_oauth_scopes, s.upstream_oauth_authorization_url, s.upstream_oauth_token_url, s.upstream_oauth_client_id, s.upstream_oauth_client_secret, s.created_at, s.updated_at
-            FROM mcp_servers s
-            INNER JOIN workspace_members wm ON s.workspace_id = wm.workspace_id
-            WHERE wm.user_id = $1
-            ORDER BY s.created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
+            &format!(
+                "SELECT DISTINCT {SERVER_COLS_S} FROM mcp_servers s \
+                 INNER JOIN workspace_members wm ON s.workspace_id = wm.workspace_id \
+                 WHERE wm.user_id = $1 ORDER BY s.created_at DESC LIMIT $2 OFFSET $3"
+            ),
         )
         .bind(user_id)
         .bind(effective_limit)
@@ -485,15 +462,10 @@ impl ServerRepository {
     /// Used by the background token refresh job.
     pub async fn list_running_with_upstream_oauth(pool: &PgPool) -> Result<Vec<McpServer>> {
         let servers = sqlx::query_as::<_, McpServer>(
-            r#"
-            SELECT id, workspace_id, name, slug, description, github_repo, github_branch,
-                   github_installation_id, runtime, visibility, access_mode, transport, status, endpoint_url,
-                   rate_limit_per_minute, region, root_directory, mcp_path, entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, created_at, updated_at
-            FROM mcp_servers
-            WHERE status = 'running'
-              AND upstream_oauth_provider IS NOT NULL
-            LIMIT 5000
-            "#,
+            &format!(
+                "SELECT {SERVER_COLS} FROM mcp_servers \
+                 WHERE status = 'running' AND upstream_oauth_provider IS NOT NULL LIMIT 5000"
+            ),
         )
         .fetch_all(pool)
         .await?;

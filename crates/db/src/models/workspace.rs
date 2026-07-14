@@ -23,12 +23,7 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn plan(&self) -> Plan {
-        match self.plan.as_str() {
-            "pro" => Plan::Pro,
-            "team" => Plan::Team,
-            "enterprise" => Plan::Enterprise,
-            _ => Plan::Free,
-        }
+        Plan::from_str(&self.plan)
     }
 }
 
@@ -55,13 +50,7 @@ pub struct WorkspaceMember {
 
 impl WorkspaceMember {
     pub fn role(&self) -> WorkspaceRole {
-        match self.role.as_str() {
-            "owner" => WorkspaceRole::Owner,
-            "admin" => WorkspaceRole::Admin,
-            "member" => WorkspaceRole::Member,
-            "viewer" => WorkspaceRole::Viewer,
-            _ => WorkspaceRole::Viewer,
-        }
+        WorkspaceRole::from_str(&self.role)
     }
 }
 
@@ -85,22 +74,11 @@ pub struct WorkspaceWithRole {
 
 impl WorkspaceWithRole {
     pub fn plan(&self) -> Plan {
-        match self.plan.as_str() {
-            "pro" => Plan::Pro,
-            "team" => Plan::Team,
-            "enterprise" => Plan::Enterprise,
-            _ => Plan::Free,
-        }
+        Plan::from_str(&self.plan)
     }
 
     pub fn role(&self) -> WorkspaceRole {
-        match self.role.as_str() {
-            "owner" => WorkspaceRole::Owner,
-            "admin" => WorkspaceRole::Admin,
-            "member" => WorkspaceRole::Member,
-            "viewer" => WorkspaceRole::Viewer,
-            _ => WorkspaceRole::Viewer,
-        }
+        WorkspaceRole::from_str(&self.role)
     }
 }
 
@@ -119,12 +97,6 @@ pub struct MemberWithUser {
 
 impl MemberWithUser {
     pub fn role(&self) -> WorkspaceRole {
-        match self.role.as_str() {
-            "owner" => WorkspaceRole::Owner,
-            "admin" => WorkspaceRole::Admin,
-            "member" => WorkspaceRole::Member,
-            "viewer" => WorkspaceRole::Viewer,
-            _ => WorkspaceRole::Viewer,
-        }
+        WorkspaceRole::from_str(&self.role)
     }
 }

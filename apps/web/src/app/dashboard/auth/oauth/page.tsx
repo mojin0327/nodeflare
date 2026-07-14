@@ -19,7 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { format } from 'date-fns';
+import { formatSlashDate } from '@/lib/date-utils';
 import { useSetPageHeader } from '../../page-header';
 
 interface OAuthApp {
@@ -201,7 +201,7 @@ function OAuthAppRow({
         <div className="flex items-center justify-between">
           <span className="font-medium text-gray-900">{app.client_name}</span>
           <div className="flex items-center gap-3 text-xs text-gray-400">
-            <span>{format(new Date(app.created_at), 'yyyy/MM/dd')}{t('list.createdSuffix')}</span>
+            <span>{formatSlashDate(app.created_at)}{t('list.createdSuffix')}</span>
           </div>
         </div>
         {/* Bottom Row: Client ID + Server + Scopes */}

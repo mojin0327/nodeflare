@@ -89,12 +89,7 @@ pub async fn add(
             .await?
             .ok_or_else(|| AppError::not_found("Workspace"))?;
 
-        let billing_plan = match workspace.plan.as_str() {
-            "pro" => BillingPlan::Pro,
-            "team" => BillingPlan::Team,
-            "enterprise" => BillingPlan::Enterprise,
-            _ => BillingPlan::Free,
-        };
+        let billing_plan = BillingPlan::from_str(&workspace.plan);
 
         // Use count query instead of fetching all members
         let member_count = WorkspaceRepository::count_members(&state.db, workspace_id)

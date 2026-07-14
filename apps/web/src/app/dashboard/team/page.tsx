@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Users, User, Plus, AlertCircle, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { findPlanLimits } from '@/lib/plans';
 import { TeamMember, AddMemberRequest, WorkspaceRole, getApiErrorCode, getApiErrorMessage } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,7 @@ export default function TeamPage() {
     queryFn: () => api.get('/billing/plans'),
   });
 
-  const currentPlanLimits = plans?.find(p => p.plan === (currentWorkspace?.plan || 'free'))?.limits;
+  const currentPlanLimits = findPlanLimits(plans, currentWorkspace?.plan);
   const maxMembers = currentPlanLimits?.max_team_members || 1;
   const currentMemberCount = isErrorMembers ? 0 : (members?.length || 0);
   const isAtLimit = !isErrorMembers && currentMemberCount >= maxMembers;

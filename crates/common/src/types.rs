@@ -160,6 +160,32 @@ impl Default for WorkspaceRole {
     }
 }
 
+impl WorkspaceRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Admin => "admin",
+            Self::Member => "member",
+            Self::Viewer => "viewer",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "owner" => Self::Owner,
+            "admin" => Self::Admin,
+            "member" => Self::Member,
+            _ => Self::Viewer,
+        }
+    }
+}
+
+impl std::fmt::Display for WorkspaceRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Plan {
@@ -172,6 +198,32 @@ pub enum Plan {
 impl Default for Plan {
     fn default() -> Self {
         Self::Free
+    }
+}
+
+impl Plan {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::Pro => "pro",
+            Self::Team => "team",
+            Self::Enterprise => "enterprise",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "pro" => Self::Pro,
+            "team" => Self::Team,
+            "enterprise" => Self::Enterprise,
+            _ => Self::Free,
+        }
+    }
+}
+
+impl std::fmt::Display for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
