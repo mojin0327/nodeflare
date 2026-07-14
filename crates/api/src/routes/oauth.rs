@@ -23,9 +23,10 @@ use url::Url;
 use uuid::Uuid;
 use rand::RngCore;
 
+use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
-use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_SERVER_NOT_FOUND};
+use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND};
 
 // Token expiration times
 const REFRESH_TOKEN_EXPIRES_DAYS: i64 = 30;
@@ -76,6 +77,22 @@ pub struct OAuthClientResponse {
     pub created_at: String,
 }
 
+fn to_oauth_client_response(client: OAuthClient, secret: Option<String>) -> OAuthClientResponse {
+    let redirect_uris = client.redirect_uris();
+    let scopes = client.scopes();
+    let created_at = client.created_at.to_rfc3339();
+    OAuthClientResponse {
+        id: client.id,
+        client_id: client.client_id,
+        client_secret: secret,
+        client_name: client.client_name,
+        redirect_uris,
+        server_id: client.server_id,
+        scopes,
+        created_at,
+    }
+}
+
 /// List OAuth clients for a workspace
 pub async fn list_clients(
     State(state): State<Arc<AppState>>,
@@ -85,30 +102,16 @@ pub async fn list_clients(
     // Verify user is a member of this workspace
     let _ = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let clients = OAuthClientRepository::list_by_workspace(&state.db, workspace_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
     let response: Vec<OAuthClientResponse> = clients
         .into_iter()
-        .map(|c| {
-            let redirect_uris = c.redirect_uris();
-            let scopes = c.scopes();
-            let created_at = c.created_at.to_rfc3339();
-            OAuthClientResponse {
-                id: c.id,
-                client_id: c.client_id,
-                client_secret: None, // Never return secret after creation
-                client_name: c.client_name,
-                redirect_uris,
-                server_id: c.server_id,
-                scopes,
-                created_at,
-            }
-        })
+        .map(|c| to_oauth_client_response(c, None))
         .collect();
 
     Ok(Json(response))
@@ -124,8 +127,8 @@ pub async fn create_client(
     // Verify user is a member of this workspace with sufficient permissions
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Only Admin and Owner can create OAuth clients
     if matches!(member.role(), WorkspaceRole::Viewer) {
@@ -159,21 +162,9 @@ pub async fn create_client(
 
     let client = OAuthClientRepository::create(&state.db, data)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
-    let redirect_uris = client.redirect_uris();
-    let scopes = client.scopes();
-    let created_at = client.created_at.to_rfc3339();
-    Ok(Json(OAuthClientResponse {
-        id: client.id,
-        client_id: client.client_id,
-        client_secret: Some(client_secret), // Return secret only on creation
-        client_name: client.client_name,
-        redirect_uris,
-        server_id: client.server_id,
-        scopes,
-        created_at,
-    }))
+    Ok(Json(to_oauth_client_response(client, Some(client_secret))))
 }
 
 /// Get OAuth client for a specific server
@@ -185,12 +176,12 @@ pub async fn get_server_oauth(
     // Verify user is a member of this workspace
     let _ = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let client = OAuthClientRepository::find_by_server_id(&state.db, server_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, "OAuth client not found for this server".to_string()))?;
 
     // Verify client belongs to workspace
@@ -198,19 +189,7 @@ pub async fn get_server_oauth(
         return Err((StatusCode::NOT_FOUND, "OAuth client not found".to_string()));
     }
 
-    let redirect_uris = client.redirect_uris();
-    let scopes = client.scopes();
-    let created_at = client.created_at.to_rfc3339();
-    Ok(Json(OAuthClientResponse {
-        id: client.id,
-        client_id: client.client_id,
-        client_secret: None, // Never return secret after creation
-        client_name: client.client_name,
-        redirect_uris,
-        server_id: client.server_id,
-        scopes,
-        created_at,
-    }))
+    Ok(Json(to_oauth_client_response(client, None)))
 }
 
 /// Regenerate OAuth client secret for a server
@@ -222,8 +201,8 @@ pub async fn regenerate_server_oauth_secret(
     // Verify user is a member of this workspace with sufficient permissions
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Only Admin and Owner can regenerate OAuth secrets
     if matches!(member.role(), WorkspaceRole::Viewer) {
@@ -232,7 +211,7 @@ pub async fn regenerate_server_oauth_secret(
 
     let client = OAuthClientRepository::find_by_server_id(&state.db, server_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, "OAuth client not found for this server".to_string()))?;
 
     // Verify client belongs to workspace
@@ -247,25 +226,13 @@ pub async fn regenerate_server_oauth_secret(
     // Update the secret
     OAuthClientRepository::update_secret(&state.db, client.id, &new_secret_hash)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
     // Revoke all existing tokens
     let _ = OAuthAccessTokenRepository::revoke_by_client(&state.db, client.id).await;
     let _ = OAuthRefreshTokenRepository::revoke_by_client(&state.db, client.id).await;
 
-    let redirect_uris = client.redirect_uris();
-    let scopes = client.scopes();
-    let created_at = client.created_at.to_rfc3339();
-    Ok(Json(OAuthClientResponse {
-        id: client.id,
-        client_id: client.client_id,
-        client_secret: Some(new_secret), // Return new secret
-        client_name: client.client_name,
-        redirect_uris,
-        server_id: client.server_id,
-        scopes,
-        created_at,
-    }))
+    Ok(Json(to_oauth_client_response(client, Some(new_secret))))
 }
 
 /// Delete an OAuth client
@@ -277,8 +244,8 @@ pub async fn delete_client(
     // Verify user is a member of this workspace with sufficient permissions
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Only Admin and Owner can delete OAuth clients
     if matches!(member.role(), WorkspaceRole::Viewer) {
@@ -288,7 +255,7 @@ pub async fn delete_client(
     // Verify client belongs to workspace
     let client = OAuthClientRepository::find_by_id(&state.db, client_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, "Client not found".to_string()))?;
 
     if client.workspace_id != Some(workspace_id) {
@@ -301,7 +268,7 @@ pub async fn delete_client(
 
     OAuthClientRepository::delete(&state.db, client_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -635,7 +602,7 @@ pub async fn authorize(
     // Find the OAuth client
     let client = OAuthClientRepository::find_by_client_id(&state.db, &params.client_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::BAD_REQUEST, "invalid_client".to_string()))?;
 
     // Validate redirect_uri
@@ -1132,7 +1099,7 @@ pub async fn resolve_credentials(
 
     let record = UpstreamOAuthProviderRepository::find_by_name(db, provider_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or_else(|| (StatusCode::BAD_REQUEST, format!("Unknown upstream OAuth provider: {}", provider_name)))?;
 
     if !record.is_enabled {
@@ -1206,7 +1173,7 @@ pub async fn list_upstream_providers(
 
     let providers = UpstreamOAuthProviderRepository::list_enabled(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
     let response = providers
         .into_iter()
@@ -1233,13 +1200,13 @@ pub async fn upstream_authorize(
 ) -> Result<Response, (StatusCode, String)> {
     let server = ServerRepository::find_by_id(&state.db, params.server_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     let _ = WorkspaceRepository::get_member(&state.db, server.workspace_id, auth_user.user_id)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()))?
-        .ok_or((StatusCode::FORBIDDEN, "Not a workspace member".to_string()))?;
+        .map_err(db_error)?
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let provider_name = server
         .upstream_oauth_provider
@@ -1345,7 +1312,7 @@ pub async fn upstream_callback(
 
     let server = ServerRepository::find_by_id(&state.db, payload.server_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     let creds = resolve_credentials(&state.db, &payload.provider, &server).await?;
@@ -1495,7 +1462,7 @@ pub async fn client_info(
 ) -> Result<Json<ClientInfoResponse>, (StatusCode, String)> {
     let client = OAuthClientRepository::find_by_client_id(&state.db, &q.client_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, "invalid_client".to_string()))?;
     let scopes = client.scopes();
     Ok(Json(ClientInfoResponse {
@@ -1537,7 +1504,7 @@ pub async fn authorize_code(
     // Find the OAuth client
     let client = OAuthClientRepository::find_by_client_id(&state.db, &body.client_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(db_error)?
         .ok_or((StatusCode::BAD_REQUEST, "invalid_client".to_string()))?;
 
     // Validate redirect_uri
@@ -1594,7 +1561,7 @@ pub async fn authorize_code(
 
     OAuthAuthorizationCodeRepository::create(&state.db, auth_code)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(db_error)?;
 
     tracing::info!(
         "OAuth authorize-code success: client_id={}, redirect_uri={}, user_id={}",

@@ -17,6 +17,48 @@ use crate::state::AppState;
 
 const SERVER_LIST_ALL_LIMIT: i64 = 1000;
 
+fn to_server_response(s: mcp_db::McpServer) -> ServerResponse {
+    let runtime = s.runtime();
+    let visibility = s.visibility();
+    let access_mode = s.access_mode();
+    let transport = s.transport();
+    let status = s.status();
+    ServerResponse {
+        id: s.id,
+        workspace_id: s.workspace_id,
+        name: s.name,
+        slug: s.slug,
+        description: s.description,
+        github_repo: s.github_repo,
+        github_branch: s.github_branch,
+        runtime,
+        visibility,
+        access_mode,
+        transport,
+        status,
+        endpoint_url: s.endpoint_url,
+        region: s.region,
+        root_directory: s.root_directory,
+        mcp_path: s.mcp_path,
+        entry_command: s.entry_command,
+        build_command: s.build_command,
+        auth_enabled: s.auth_enabled,
+        memory_mb: s.memory_mb,
+        port: s.port,
+        tool_list_filter_by_scope: s.tool_list_filter_by_scope,
+        tool_schema_slim: s.tool_schema_slim,
+        tool_search_mode: s.tool_search_mode,
+        tool_code_mode: s.tool_code_mode,
+        upstream_oauth_provider: s.upstream_oauth_provider,
+        upstream_oauth_scopes: s.upstream_oauth_scopes,
+        upstream_oauth_authorization_url: s.upstream_oauth_authorization_url,
+        upstream_oauth_token_url: s.upstream_oauth_token_url,
+        upstream_oauth_client_id: s.upstream_oauth_client_id,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct ServerPath {
     pub workspace_id: Uuid,
@@ -63,50 +105,7 @@ pub async fn list_all(
     let servers = ServerRepository::list_all_by_user(&state.db, auth_user.user_id)
         .await?;
 
-    let response: Vec<ServerResponse> = servers
-        .into_iter()
-        .map(|s| {
-            let runtime = s.runtime();
-            let visibility = s.visibility();
-            let access_mode = s.access_mode();
-            let transport = s.transport();
-            let status = s.status();
-            ServerResponse {
-                id: s.id,
-                workspace_id: s.workspace_id,
-                name: s.name,
-                slug: s.slug,
-                description: s.description,
-                github_repo: s.github_repo,
-                github_branch: s.github_branch,
-                runtime,
-                visibility,
-                access_mode,
-                transport,
-                status,
-                endpoint_url: s.endpoint_url,
-                region: s.region,
-                root_directory: s.root_directory,
-                mcp_path: s.mcp_path,
-                entry_command: s.entry_command,
-                build_command: s.build_command,
-                auth_enabled: s.auth_enabled,
-                memory_mb: s.memory_mb,
-                port: s.port,
-                tool_list_filter_by_scope: s.tool_list_filter_by_scope,
-                tool_schema_slim: s.tool_schema_slim,
-                tool_search_mode: s.tool_search_mode,
-                tool_code_mode: s.tool_code_mode,
-                upstream_oauth_provider: s.upstream_oauth_provider,
-                upstream_oauth_scopes: s.upstream_oauth_scopes,
-                upstream_oauth_authorization_url: s.upstream_oauth_authorization_url,
-                upstream_oauth_token_url: s.upstream_oauth_token_url,
-                upstream_oauth_client_id: s.upstream_oauth_client_id,
-                created_at: s.created_at,
-                updated_at: s.updated_at,
-            }
-        })
-        .collect();
+    let response: Vec<ServerResponse> = servers.into_iter().map(to_server_response).collect();
 
     Ok(Json(response))
 }
@@ -295,50 +294,7 @@ pub async fn list(
     )
     .await?;
 
-    let response: Vec<ServerResponse> = servers
-        .into_iter()
-        .map(|s| {
-            let runtime = s.runtime();
-            let visibility = s.visibility();
-            let access_mode = s.access_mode();
-            let transport = s.transport();
-            let status = s.status();
-            ServerResponse {
-                id: s.id,
-                workspace_id: s.workspace_id,
-                name: s.name,
-                slug: s.slug,
-                description: s.description,
-                github_repo: s.github_repo,
-                github_branch: s.github_branch,
-                runtime,
-                visibility,
-                access_mode,
-                transport,
-                status,
-                endpoint_url: s.endpoint_url,
-                region: s.region,
-                root_directory: s.root_directory,
-                mcp_path: s.mcp_path,
-                entry_command: s.entry_command,
-                build_command: s.build_command,
-                auth_enabled: s.auth_enabled,
-                memory_mb: s.memory_mb,
-                port: s.port,
-                tool_list_filter_by_scope: s.tool_list_filter_by_scope,
-                tool_schema_slim: s.tool_schema_slim,
-                tool_search_mode: s.tool_search_mode,
-                tool_code_mode: s.tool_code_mode,
-                upstream_oauth_provider: s.upstream_oauth_provider,
-                upstream_oauth_scopes: s.upstream_oauth_scopes,
-                upstream_oauth_authorization_url: s.upstream_oauth_authorization_url,
-                upstream_oauth_token_url: s.upstream_oauth_token_url,
-                upstream_oauth_client_id: s.upstream_oauth_client_id,
-                created_at: s.created_at,
-                updated_at: s.updated_at,
-            }
-        })
-        .collect();
+    let response: Vec<ServerResponse> = servers.into_iter().map(to_server_response).collect();
 
     Ok(Json(response))
 }
@@ -769,45 +725,10 @@ pub async fn create(
         }
     }
 
-    // Return server response with building status
-    let runtime = server.runtime();
-    let visibility = server.visibility();
-    let access_mode = server.access_mode();
-    let transport = server.transport();
-    Ok(Json(ServerResponse {
-        id: server.id,
-        workspace_id: server.workspace_id,
-        name: server.name,
-        slug: server.slug,
-        description: server.description,
-        github_repo: server.github_repo,
-        github_branch: server.github_branch,
-        runtime,
-        visibility,
-        access_mode,
-        transport,
-        status: mcp_common::types::ServerStatus::Building, // Always building after creation
-        endpoint_url: server.endpoint_url,
-        region: server.region,
-        root_directory: server.root_directory,
-        mcp_path: server.mcp_path,
-        entry_command: server.entry_command,
-        build_command: server.build_command,
-        auth_enabled: server.auth_enabled,
-        memory_mb: server.memory_mb,
-        port: server.port,
-        tool_list_filter_by_scope: server.tool_list_filter_by_scope,
-        tool_schema_slim: server.tool_schema_slim,
-        tool_search_mode: server.tool_search_mode,
-        tool_code_mode: server.tool_code_mode,
-        upstream_oauth_provider: server.upstream_oauth_provider,
-        upstream_oauth_scopes: server.upstream_oauth_scopes,
-        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
-        upstream_oauth_token_url: server.upstream_oauth_token_url,
-        upstream_oauth_client_id: server.upstream_oauth_client_id,
-        created_at: server.created_at,
-        updated_at: server.updated_at,
-    }))
+    // Return server response with building status (DB row still shows inactive at this point)
+    let mut response = to_server_response(server);
+    response.status = mcp_common::types::ServerStatus::Building;
+    Ok(Json(response))
 }
 
 pub async fn get(
@@ -826,45 +747,7 @@ pub async fn get(
         return Err(AppError::not_found("Server"));
     }
 
-    let runtime = server.runtime();
-    let visibility = server.visibility();
-    let access_mode = server.access_mode();
-    let transport = server.transport();
-    let status = server.status();
-    Ok(Json(ServerResponse {
-        id: server.id,
-        workspace_id: server.workspace_id,
-        name: server.name,
-        slug: server.slug,
-        description: server.description,
-        github_repo: server.github_repo,
-        github_branch: server.github_branch,
-        runtime,
-        visibility,
-        access_mode,
-        transport,
-        status,
-        endpoint_url: server.endpoint_url,
-        region: server.region,
-        root_directory: server.root_directory,
-        mcp_path: server.mcp_path,
-        entry_command: server.entry_command,
-        build_command: server.build_command,
-        auth_enabled: server.auth_enabled,
-        memory_mb: server.memory_mb,
-        port: server.port,
-        tool_list_filter_by_scope: server.tool_list_filter_by_scope,
-        tool_schema_slim: server.tool_schema_slim,
-        tool_search_mode: server.tool_search_mode,
-        tool_code_mode: server.tool_code_mode,
-        upstream_oauth_provider: server.upstream_oauth_provider,
-        upstream_oauth_scopes: server.upstream_oauth_scopes,
-        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
-        upstream_oauth_token_url: server.upstream_oauth_token_url,
-        upstream_oauth_client_id: server.upstream_oauth_client_id,
-        created_at: server.created_at,
-        updated_at: server.updated_at,
-    }))
+    Ok(Json(to_server_response(server)))
 }
 
 pub async fn update(
@@ -957,45 +840,7 @@ pub async fn update(
     )
     .await?;
 
-    let runtime = server.runtime();
-    let visibility = server.visibility();
-    let access_mode = server.access_mode();
-    let transport = server.transport();
-    let status = server.status();
-    Ok(Json(ServerResponse {
-        id: server.id,
-        workspace_id: server.workspace_id,
-        name: server.name,
-        slug: server.slug,
-        description: server.description,
-        github_repo: server.github_repo,
-        github_branch: server.github_branch,
-        runtime,
-        visibility,
-        access_mode,
-        transport,
-        status,
-        endpoint_url: server.endpoint_url,
-        region: server.region,
-        root_directory: server.root_directory,
-        mcp_path: server.mcp_path,
-        entry_command: server.entry_command,
-        build_command: server.build_command,
-        auth_enabled: server.auth_enabled,
-        memory_mb: server.memory_mb,
-        port: server.port,
-        tool_list_filter_by_scope: server.tool_list_filter_by_scope,
-        tool_schema_slim: server.tool_schema_slim,
-        tool_search_mode: server.tool_search_mode,
-        tool_code_mode: server.tool_code_mode,
-        upstream_oauth_provider: server.upstream_oauth_provider,
-        upstream_oauth_scopes: server.upstream_oauth_scopes,
-        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
-        upstream_oauth_token_url: server.upstream_oauth_token_url,
-        upstream_oauth_client_id: server.upstream_oauth_client_id,
-        created_at: server.created_at,
-        updated_at: server.updated_at,
-    }))
+    Ok(Json(to_server_response(server)))
 }
 
 pub async fn delete(
@@ -1203,22 +1048,7 @@ pub async fn deploy(
 
     tracing::info!("Build job enqueued for deployment {}", deployment.id);
 
-    let status = deployment.status();
-    let build_duration_seconds = deployment.finished_at.map(|f| (f - deployment.started_at).num_seconds());
-    Ok(Json(mcp_common::types::DeploymentResponse {
-        id: deployment.id,
-        server_id: deployment.server_id,
-        version: deployment.version,
-        commit_sha: deployment.commit_sha,
-        status,
-        error_message: deployment.error_message,
-        build_logs: deployment.build_logs,
-        started_at: deployment.started_at,
-        finished_at: deployment.finished_at,
-        created_at: deployment.started_at,
-        deployed_at: deployment.finished_at,
-        build_duration_seconds,
-    }))
+    Ok(Json(crate::routes::deployments::to_deployment_response(deployment)))
 }
 
 pub async fn stop(
@@ -1226,16 +1056,8 @@ pub async fn stop(
     auth_user: AuthUser,
     Path(path): Path<ServerPath>,
 ) -> Result<Json<ServerResponse>, AppError> {
-    // Check membership and permission
-    let member = WorkspaceRepository::get_member(&state.db, path.workspace_id, auth_user.user_id)
-        .await?
-        .ok_or_else(|| AppError::forbidden("Not a member of this workspace"))?;
+    workspace::require_write_access(&state.db, path.workspace_id, auth_user.user_id).await?;
 
-    if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err(AppError::forbidden("Insufficient permissions"));
-    }
-
-    // Verify server belongs to workspace
     let server = ServerRepository::find_by_id(&state.db, path.server_id)
         .await?
         .ok_or_else(|| AppError::not_found("Server"))?;
@@ -1248,7 +1070,6 @@ pub async fn stop(
         return Err(AppError::bad_request("SERVER_NOT_RUNNING", "Server is not running"));
     }
 
-    // Update server status to stopped
     ServerRepository::update_status(
         &state.db,
         path.server_id,
@@ -1257,50 +1078,11 @@ pub async fn stop(
     )
     .await?;
 
-    // Get updated server
     let server = ServerRepository::find_by_id(&state.db, path.server_id)
         .await?
         .ok_or_else(|| AppError::not_found("Server"))?;
 
-    let runtime = server.runtime();
-    let visibility = server.visibility();
-    let access_mode = server.access_mode();
-    let transport = server.transport();
-    let status = server.status();
-    Ok(Json(ServerResponse {
-        id: server.id,
-        workspace_id: server.workspace_id,
-        name: server.name,
-        slug: server.slug,
-        description: server.description,
-        github_repo: server.github_repo,
-        github_branch: server.github_branch,
-        runtime,
-        visibility,
-        access_mode,
-        transport,
-        status,
-        endpoint_url: server.endpoint_url,
-        region: server.region,
-        root_directory: server.root_directory,
-        mcp_path: server.mcp_path,
-        entry_command: server.entry_command,
-        build_command: server.build_command,
-        auth_enabled: server.auth_enabled,
-        memory_mb: server.memory_mb,
-        port: server.port,
-        tool_list_filter_by_scope: server.tool_list_filter_by_scope,
-        tool_schema_slim: server.tool_schema_slim,
-        tool_search_mode: server.tool_search_mode,
-        tool_code_mode: server.tool_code_mode,
-        upstream_oauth_provider: server.upstream_oauth_provider,
-        upstream_oauth_scopes: server.upstream_oauth_scopes,
-        upstream_oauth_authorization_url: server.upstream_oauth_authorization_url,
-        upstream_oauth_token_url: server.upstream_oauth_token_url,
-        upstream_oauth_client_id: server.upstream_oauth_client_id,
-        created_at: server.created_at,
-        updated_at: server.updated_at,
-    }))
+    Ok(Json(to_server_response(server)))
 }
 
 pub async fn restart(
@@ -1308,16 +1090,8 @@ pub async fn restart(
     auth_user: AuthUser,
     Path(path): Path<ServerPath>,
 ) -> Result<Json<mcp_common::types::DeploymentResponse>, AppError> {
-    // Check membership and permission
-    let member = WorkspaceRepository::get_member(&state.db, path.workspace_id, auth_user.user_id)
-        .await?
-        .ok_or_else(|| AppError::forbidden("Not a member of this workspace"))?;
+    workspace::require_write_access(&state.db, path.workspace_id, auth_user.user_id).await?;
 
-    if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err(AppError::forbidden("Insufficient permissions"));
-    }
-
-    // Verify server belongs to workspace
     let server = ServerRepository::find_by_id(&state.db, path.server_id)
         .await?
         .ok_or_else(|| AppError::not_found("Server"))?;
@@ -1326,8 +1100,7 @@ pub async fn restart(
         return Err(AppError::not_found("Server"));
     }
 
-    // For restart, we trigger a new deployment
-    // This reuses the deploy logic
+    // Restart triggers a new deployment
     deploy(State(state), auth_user, Path(path)).await
 }
 

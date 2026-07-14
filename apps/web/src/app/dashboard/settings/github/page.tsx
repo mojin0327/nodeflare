@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { getLinkedAccounts, unlinkAccount, setPrimaryAccount, getLinkUrl, LinkedGitHubAccount } from '@/lib/github-api';
 import { useSetPageHeader } from '../../page-header';
+import { formatDate } from '@/lib/date-utils';
 
 export default function GitHubSettingsPage() {
   const t = useTranslations('github');
@@ -146,7 +147,7 @@ export default function GitHubSettingsPage() {
                   )}
                 </div>
                 <p className="text-sm text-gray-500 truncate">
-                  {t('connectedOn', { date: new Date(account.created_at).toLocaleDateString() })}
+                  {t('connectedOn', { date: formatDate(account.created_at) })}
                 </p>
               </div>
 

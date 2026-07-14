@@ -12,10 +12,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::{db_error, internal_error};
-use crate::extractors::AuthUser;
+use crate::extractors::{workspace, AuthUser};
 use crate::middleware::rate_limit::extract_client_ip;
 use crate::state::AppState;
-use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
+use crate::routes::helpers::ERR_WORKSPACE_NOT_FOUND;
 
 // Lock timeout for checkout creation (prevents race conditions)
 const CHECKOUT_LOCK_TTL_SECS: i64 = 30;
@@ -69,10 +69,9 @@ pub async fn get_subscription(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<SubscriptionResponse>, (StatusCode, String)> {
     // Verify user has access
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -107,10 +106,9 @@ pub async fn get_usage(
     auth_user: AuthUser,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<UsageResponse>, (StatusCode, String)> {
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -182,14 +180,9 @@ pub async fn create_checkout(
     }
 
     // Verify user is owner/admin
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_admin(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -284,14 +277,9 @@ pub async fn change_plan(
     }
 
     // Verify user is owner/admin
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_admin(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -376,14 +364,9 @@ pub async fn cancel_subscription(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<CancelResponse>, (StatusCode, String)> {
     // Verify user is owner/admin
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_admin(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -486,14 +469,9 @@ pub async fn create_portal_session(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<PortalResponse>, (StatusCode, String)> {
     // Verify user is owner/admin
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_admin(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -677,10 +655,9 @@ pub async fn get_billing_settings(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<BillingSettingsResponse>, (StatusCode, String)> {
     // Verify user has access
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -699,15 +676,9 @@ pub async fn update_billing_settings(
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<UpdateBillingSettingsRequest>,
 ) -> Result<Json<BillingSettingsResponse>, (StatusCode, String)> {
-    // Verify user is owner/admin
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_admin(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing settings".to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     WorkspaceRepository::update_billing_settings(&state.db, workspace_id, body.auto_email_invoices)
         .await
@@ -748,10 +719,9 @@ pub async fn get_payment_method(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<PaymentMethodResponse>, (StatusCode, String)> {
     // Verify user has access
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -788,10 +758,9 @@ pub async fn list_invoices(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<InvoiceResponse>>, (StatusCode, String)> {
     // Verify user has access
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
@@ -851,10 +820,9 @@ pub async fn list_subscription_history(
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<SubscriptionHistoryItem>>, (StatusCode, String)> {
     // Verify user has access
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await

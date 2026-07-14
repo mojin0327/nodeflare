@@ -6,8 +6,9 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, KeyRound, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
-import { AccessToken, McpServerMinimal } from '@/types';
+import { AccessToken } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
+import { useServerNameMap } from '@/hooks/use-server-name-map';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -38,17 +39,7 @@ export default function AccessTokensPage() {
     enabled: !!workspaceId,
   });
 
-  const { data: servers } = useQuery<McpServerMinimal[]>({
-    queryKey: ['servers-minimal', workspaceId],
-    queryFn: () => api.get(`/workspaces/${workspaceId}/servers/minimal`),
-    enabled: !!workspaceId,
-  });
-
-  // Create a map for quick server name lookup
-  const serverMap = useMemo(
-    () => new Map(servers?.map(s => [s.id, s.name]) || []),
-    [servers]
-  );
+  const serverMap = useServerNameMap(workspaceId);
 
   const isLoading = isLoadingWorkspaces || isLoadingKeys;
   const isError = isErrorWorkspaces || isErrorKeys;

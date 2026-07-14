@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Header, Footer } from '@/components/layout';
 import Link from 'next/link';
 import { getTranslations, getLocale } from 'next-intl/server';
+import { formatLocalizedDate } from '@/lib/date-utils';
 
 interface BlogPost {
   id: string;
@@ -10,16 +11,6 @@ interface BlogPost {
   excerpt?: string;
   publishDate?: string;
   categories: { id: string; name: string }[];
-}
-
-function formatDate(dateString: string | undefined, locale: string): string {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 // Map next-intl locale to Hygraph locales with fallback
@@ -115,7 +106,7 @@ export default async function BlogPage() {
                   </span>
                 )}
                 <span className="text-xs text-gray-400">
-                  {post.publishDate && formatDate(post.publishDate, locale)}
+                  {post.publishDate && formatLocalizedDate(post.publishDate, locale, 'short')}
                 </span>
               </div>
               <h2 className="text-base font-bold text-gray-900 group-hover:text-violet-600 transition-colors line-clamp-2">

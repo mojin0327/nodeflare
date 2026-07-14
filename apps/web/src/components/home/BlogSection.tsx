@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { formatLocalizedDate } from '@/lib/date-utils';
 
 interface BlogPost {
   id: string;
@@ -12,16 +13,6 @@ interface BlogPost {
   excerpt?: string;
   publishDate?: string;
   categories: { id: string; name: string }[];
-}
-
-function formatDate(dateString?: string): string {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString('ja-JP', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 export function BlogSection() {
@@ -74,7 +65,7 @@ export function BlogSection() {
                     {post.categories[0].name}
                   </span>
                 )}
-                <span className="text-xs text-gray-400">{formatDate(post.publishDate)}</span>
+                <span className="text-xs text-gray-400">{formatLocalizedDate(post.publishDate, 'ja', 'short')}</span>
               </div>
               <h3 className="text-base font-bold text-gray-900 group-hover:text-violet-600 transition-colors line-clamp-2">
                 {post.title}

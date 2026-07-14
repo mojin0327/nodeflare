@@ -1,5 +1,4 @@
 use crate::models::{CreateTool, Tool, UpdateTool, UpsertTool};
-use mcp_common::types::ToolPermissionLevel;
 use mcp_common::Result;
 use pgvector::Vector;
 use sqlx::PgPool;
@@ -129,11 +128,7 @@ impl ToolRepository {
     }
 
     pub async fn update(pool: &PgPool, id: Uuid, data: UpdateTool) -> Result<Tool> {
-        let permission_str = data.permission_level.map(|p| match p {
-            ToolPermissionLevel::Normal => "normal",
-            ToolPermissionLevel::Elevated => "elevated",
-            ToolPermissionLevel::Dangerous => "dangerous",
-        });
+        let permission_str = data.permission_level.map(|p| p.to_string());
 
         let tool = sqlx::query_as::<_, Tool>(
             r#"

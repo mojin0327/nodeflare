@@ -4,35 +4,25 @@ use axum::{
     Json,
 };
 use mcp_auth::ApiKeyService;
+use mcp_billing::Plan as BillingPlan;
 use mcp_common::types::{ApiKeyCreatedResponse, ApiKeyResponse, CreateApiKeyRequest};
 use mcp_db::{ApiKeyRepository, WorkspaceRepository};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::db_error;
-use crate::extractors::AuthUser;
+use crate::extractors::{workspace, AuthUser};
 use crate::state::AppState;
-use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
-
-fn get_api_key_limit(plan: &str) -> i64 {
-    match plan {
-        "free" => 5,
-        "pro" => 20,
-        "team" => 100,
-        "enterprise" => i64::MAX,
-        _ => 5, // Default to free plan limit
-    }
-}
+use crate::routes::helpers::ERR_WORKSPACE_NOT_FOUND;
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<Vec<ApiKeyResponse>>, (StatusCode, String)> {
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     let keys = ApiKeyRepository::list_by_workspace(&state.db, workspace_id)
         .await
@@ -64,17 +54,12 @@ pub async fn create(
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyCreatedResponse>, (StatusCode, String)> {
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_write_access(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Check API key limit based on plan
-    let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
+    let ws = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
         .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
@@ -83,14 +68,13 @@ pub async fn create(
         .await
         .map_err(db_error)?;
 
-    let limit = get_api_key_limit(&workspace.plan);
+    let limit = BillingPlan::from_str(&ws.plan).limits().max_api_keys as i64;
     if current_count >= limit {
         return Err((
             StatusCode::FORBIDDEN,
             format!(
                 "API key limit reached. Your {} plan allows up to {} API keys.",
-                workspace.plan,
-                limit
+                ws.plan, limit
             ),
         ));
     }
@@ -144,14 +128,9 @@ pub async fn delete(
     auth_user: AuthUser,
     Path((workspace_id, key_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_write_access(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Verify api key belongs to this workspace
     let existing = ApiKeyRepository::find_by_id(&state.db, key_id)

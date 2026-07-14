@@ -1,5 +1,5 @@
 use crate::models::{CreateServer, McpServer, UpdateServer};
-use mcp_common::types::{AccessMode, ServerStatus, Transport, Visibility};
+use mcp_common::types::ServerStatus;
 use mcp_common::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -129,19 +129,9 @@ impl ServerRepository {
 
     pub async fn create(pool: &PgPool, data: CreateServer) -> Result<McpServer> {
         let runtime_str = data.runtime.to_string();
-        let visibility_str = match data.visibility {
-            Visibility::Private => "private",
-            Visibility::Team => "team",
-            Visibility::Public => "public",
-        };
-        let access_mode_str = match data.access_mode {
-            AccessMode::Public => "public",
-            AccessMode::VpnOnly => "vpn_only",
-        };
-        let transport_str = match data.transport {
-            Transport::Sse => "sse",
-            Transport::Stdio => "stdio",
-        };
+        let visibility_str = data.visibility.to_string();
+        let access_mode_str = data.access_mode.to_string();
+        let transport_str = data.transport.to_string();
 
         // Generate the id in Rust (rather than relying on the DB default) so we can derive
         // the collision-free Fly app name from the SAME id and persist both atomically.
@@ -196,26 +186,9 @@ impl ServerRepository {
     }
 
     pub async fn update(pool: &PgPool, id: Uuid, data: UpdateServer) -> Result<McpServer> {
-        let visibility_str = data.visibility.map(|v| match v {
-            Visibility::Private => "private",
-            Visibility::Team => "team",
-            Visibility::Public => "public",
-        });
-
-        let access_mode_str = data.access_mode.map(|a| match a {
-            AccessMode::Public => "public",
-            AccessMode::VpnOnly => "vpn_only",
-        });
-
-        let status_str = data.status.map(|s| match s {
-            ServerStatus::Inactive => "inactive",
-            ServerStatus::Building => "building",
-            ServerStatus::Deploying => "deploying",
-            ServerStatus::Running => "running",
-            ServerStatus::Failed => "failed",
-            ServerStatus::Stopped => "stopped",
-            ServerStatus::Deleting => "deleting",
-        });
+        let access_mode_str = data.access_mode.map(|a| a.to_string());
+        let status_str = data.status.map(|s| s.to_string());
+        let visibility_str = data.visibility.map(|v| v.to_string());
 
         let server = sqlx::query_as::<_, McpServer>(
             &format!(
@@ -335,16 +308,6 @@ impl ServerRepository {
         status: ServerStatus,
         endpoint_url: Option<&str>,
     ) -> Result<()> {
-        let status_str = match status {
-            ServerStatus::Inactive => "inactive",
-            ServerStatus::Building => "building",
-            ServerStatus::Deploying => "deploying",
-            ServerStatus::Running => "running",
-            ServerStatus::Failed => "failed",
-            ServerStatus::Stopped => "stopped",
-            ServerStatus::Deleting => "deleting",
-        };
-
         sqlx::query(
             r#"
             UPDATE mcp_servers
@@ -353,7 +316,7 @@ impl ServerRepository {
             "#,
         )
         .bind(id)
-        .bind(status_str)
+        .bind(status.to_string())
         .bind(endpoint_url)
         .execute(pool)
         .await?;

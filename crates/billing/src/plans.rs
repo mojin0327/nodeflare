@@ -84,6 +84,8 @@ pub struct PlanLimits {
     pub priority_support: bool,
     /// SSO support
     pub sso_enabled: bool,
+    /// Maximum number of API keys (personal access tokens)
+    pub max_api_keys: u32,
 }
 
 impl Default for PlanLimits {
@@ -99,6 +101,7 @@ impl Default for PlanLimits {
             custom_domains: false,
             priority_support: false,
             sso_enabled: false,
+            max_api_keys: 5,
         }
     }
 }
@@ -154,6 +157,7 @@ pub static PLANS: &[PlanDefinition] = &[
             custom_domains: false,
             priority_support: false,
             sso_enabled: false,
+            max_api_keys: 5,
         },
         features: &[
             "3 MCP servers",
@@ -181,6 +185,7 @@ pub static PLANS: &[PlanDefinition] = &[
             custom_domains: true,
             priority_support: false,
             sso_enabled: false,
+            max_api_keys: 20,
         },
         features: &[
             "20 MCP servers",
@@ -209,6 +214,7 @@ pub static PLANS: &[PlanDefinition] = &[
             custom_domains: true,
             priority_support: true,
             sso_enabled: false,
+            max_api_keys: 100,
         },
         features: &[
             "100 MCP servers",
@@ -241,6 +247,7 @@ pub static PLANS: &[PlanDefinition] = &[
             custom_domains: true,
             priority_support: true,
             sso_enabled: true,
+            max_api_keys: 10_000,
         },
         features: &[
             "Up to 10,000 MCP servers",

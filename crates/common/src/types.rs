@@ -127,6 +127,30 @@ impl Default for ServerStatus {
     }
 }
 
+impl std::fmt::Display for ServerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Inactive => "inactive",
+            Self::Building => "building",
+            Self::Deploying => "deploying",
+            Self::Running => "running",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+            Self::Deleting => "deleting",
+        })
+    }
+}
+
+impl std::fmt::Display for Visibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Private => "private",
+            Self::Team => "team",
+            Self::Public => "public",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeploymentStatus {
@@ -142,6 +166,20 @@ pub enum DeploymentStatus {
 impl Default for DeploymentStatus {
     fn default() -> Self {
         Self::Pending
+    }
+}
+
+impl std::fmt::Display for DeploymentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Pending => "pending",
+            Self::Building => "building",
+            Self::Pushing => "pushing",
+            Self::Deploying => "deploying",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        })
     }
 }
 
@@ -238,6 +276,16 @@ pub enum ToolPermissionLevel {
 impl Default for ToolPermissionLevel {
     fn default() -> Self {
         Self::Normal
+    }
+}
+
+impl std::fmt::Display for ToolPermissionLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Normal => "normal",
+            Self::Elevated => "elevated",
+            Self::Dangerous => "dangerous",
+        })
     }
 }
 

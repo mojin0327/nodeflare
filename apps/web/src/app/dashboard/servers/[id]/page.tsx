@@ -46,6 +46,7 @@ import {
 import { useSetPageHeader } from '../../page-header';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { mcpPublicUrl } from '@/lib/mcp-url';
+import { formatDateTime } from '@/lib/date-utils';
 
 // Static status colors - moved outside component to prevent recreation
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -1475,21 +1476,6 @@ function SettingsTab({
     if (preset) setUpstreamOauthScopes(preset.default_scopes.join(' '));
   };
 
-  const { data: upstreamProviders = [] } = useQuery<UpstreamOAuthProvider[]>({
-    queryKey: ['upstream-oauth-providers'],
-    queryFn: () => api.get('/oauth/upstream-providers'),
-  });
-
-  const handleOauthProviderChange = (val: string) => {
-    setUpstreamOauthProvider(val);
-    const preset = upstreamProviders.find((p) => p.name === val);
-    if (preset && !preset.is_managed) {
-      setUpstreamOauthAuthUrl('');
-      setUpstreamOauthTokenUrl('');
-    }
-    if (preset) setUpstreamOauthScopes(preset.default_scopes.join(' '));
-  };
-
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -2205,7 +2191,7 @@ function WebhooksTab({
                     </div>
                     {webhook.last_triggered_at && (
                       <span className="text-xs text-gray-400">
-                        Last: {new Date(webhook.last_triggered_at).toLocaleString()}
+                        Last: {formatDateTime(webhook.last_triggered_at)}
                         {webhook.last_status && (
                           <span className={webhook.last_status === 'success' ? 'text-green-600 ml-1' : 'text-red-600 ml-1'}>
                             ({webhook.last_status})

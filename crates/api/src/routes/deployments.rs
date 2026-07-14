@@ -5,20 +5,19 @@ use axum::{
 };
 use chrono::{Datelike, TimeZone, Utc};
 use mcp_billing::Plan as BillingPlan;
-use mcp_common::types::{DeploymentResponse, DeploymentStatus, PaginationParams, WorkspaceRole};
+use mcp_common::types::{DeploymentResponse, DeploymentStatus, PaginationParams};
 use mcp_db::{CreateDeployment, DeploymentRepository, ServerRepository, WorkspaceRepository};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::db_error;
-use crate::extractors::AuthUser;
+use crate::extractors::{workspace, AuthUser};
 use crate::routes::helpers::{
-    verify_server_ownership, ERR_DEPLOYMENT_NOT_FOUND, ERR_INSUFFICIENT_PERMISSIONS,
-    ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND, ERR_WORKSPACE_NOT_FOUND,
+    verify_server_ownership, ERR_DEPLOYMENT_NOT_FOUND, ERR_SERVER_NOT_FOUND, ERR_WORKSPACE_NOT_FOUND,
 };
 use crate::state::AppState;
 
-fn to_deployment_response(d: mcp_db::Deployment) -> DeploymentResponse {
+pub(crate) fn to_deployment_response(d: mcp_db::Deployment) -> DeploymentResponse {
     let status = d.status();
     let build_duration_seconds = d.finished_at.map(|f| (f - d.started_at).num_seconds());
     DeploymentResponse {
@@ -43,10 +42,9 @@ pub async fn list(
     Path((workspace_id, server_id)): Path<(Uuid, Uuid)>,
     Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<Vec<DeploymentResponse>>, (StatusCode, String)> {
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -73,10 +71,9 @@ pub async fn get(
     auth_user: AuthUser,
     Path((workspace_id, server_id, deployment_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<DeploymentResponse>, (StatusCode, String)> {
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -104,10 +101,9 @@ pub async fn get_logs(
     auth_user: AuthUser,
     Path((workspace_id, server_id, deployment_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<DeploymentLogsResponse>, (StatusCode, String)> {
-    WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -133,15 +129,9 @@ pub async fn rollback(
     auth_user: AuthUser,
     Path((workspace_id, server_id, deployment_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> Result<Json<DeploymentResponse>, (StatusCode, String)> {
-    // Check membership and permission
-    let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_write_access(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
-
-    if matches!(member.role(), WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
-    }
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -235,10 +225,9 @@ pub async fn usage(
     auth_user: AuthUser,
     Path(workspace_id): Path<Uuid>,
 ) -> Result<Json<DeploymentUsageResponse>, (StatusCode, String)> {
-    let _member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
+    workspace::require_member(&state.db, workspace_id, auth_user.user_id)
         .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
+        .map_err(|e| (e.status, e.body.error.message))?;
 
     // Get workspace to check plan
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)

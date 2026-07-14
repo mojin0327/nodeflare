@@ -1,6 +1,5 @@
 use crate::models::{CreateDeployment, Deployment, UpdateDeployment};
 use chrono::{DateTime, Utc};
-use mcp_common::types::DeploymentStatus;
 use mcp_common::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -90,15 +89,7 @@ impl DeploymentRepository {
     }
 
     pub async fn update(pool: &PgPool, id: Uuid, data: UpdateDeployment) -> Result<Deployment> {
-        let status_str = data.status.map(|s| match s {
-            DeploymentStatus::Pending => "pending",
-            DeploymentStatus::Building => "building",
-            DeploymentStatus::Pushing => "pushing",
-            DeploymentStatus::Deploying => "deploying",
-            DeploymentStatus::Succeeded => "succeeded",
-            DeploymentStatus::Failed => "failed",
-            DeploymentStatus::Cancelled => "cancelled",
-        });
+        let status_str = data.status.map(|s| s.to_string());
 
         let deployment = sqlx::query_as::<_, Deployment>(
             r#"

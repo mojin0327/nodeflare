@@ -4,16 +4,7 @@ import Link from 'next/link';
 import { getBlogPost, getBlogPosts, sanitizeHtml } from '@/lib/hygraph';
 import { notFound } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
-
-function formatDate(dateString: string | undefined, locale: string): string {
-  if (!dateString) return '';
-  const date = new Date(dateString);
-  return date.toLocaleDateString(locale === 'ja' ? 'ja-JP' : 'en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+import { formatLocalizedDate } from '@/lib/date-utils';
 
 // Use ISR for better SEO - revalidate every 60 seconds
 export const revalidate = 60;
@@ -133,7 +124,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             {post.publishDate && (
               <div className="flex items-center gap-4">
                 <time className="text-sm text-gray-500">
-                  {formatDate(post.publishDate, locale)}
+                  {formatLocalizedDate(post.publishDate, locale)}
                 </time>
               </div>
             )}
@@ -242,7 +233,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
                     ))}
                     {relatedPost.publishDate && (
                       <span className="text-xs text-gray-400">
-                        {formatDate(relatedPost.publishDate, locale)}
+                        {formatLocalizedDate(relatedPost.publishDate, locale)}
                       </span>
                     )}
                   </div>
