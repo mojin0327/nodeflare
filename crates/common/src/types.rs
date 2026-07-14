@@ -551,6 +551,8 @@ pub struct CreateServerRequest {
     pub upstream_oauth_client_id: Option<String>,
     /// Custom provider only: OAuth2 client_secret (write-only, never returned in responses).
     pub upstream_oauth_client_secret: Option<String>,
+    /// If created from a template, increment its use_count after successful creation.
+    pub template_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -796,6 +798,70 @@ pub struct SecretResponse {
     pub key: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Public-facing template response — internal workspace/owner UUIDs are omitted
+/// to avoid leaking them to unauthenticated callers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerTemplateResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub github_repo: String,
+    pub github_branch: String,
+    pub runtime: Runtime,
+    pub transport: Transport,
+    pub mcp_path: String,
+    pub entry_command: Option<String>,
+    pub build_command: Option<String>,
+    pub root_directory: String,
+    pub auth_enabled: bool,
+    pub memory_mb: Option<i32>,
+    pub port: Option<i32>,
+    pub upstream_oauth_provider: Option<String>,
+    pub upstream_oauth_scopes: Vec<String>,
+    pub required_env_var_keys: Vec<String>,
+    pub use_count: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Authenticated response returned only to workspace members — includes internal IDs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerTemplatePrivateResponse {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub owner_id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub github_repo: String,
+    pub github_branch: String,
+    pub runtime: Runtime,
+    pub transport: Transport,
+    pub mcp_path: String,
+    pub entry_command: Option<String>,
+    pub build_command: Option<String>,
+    pub root_directory: String,
+    pub auth_enabled: bool,
+    pub memory_mb: Option<i32>,
+    pub port: Option<i32>,
+    pub upstream_oauth_provider: Option<String>,
+    pub upstream_oauth_scopes: Vec<String>,
+    pub required_env_var_keys: Vec<String>,
+    pub use_count: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, validator::Validate)]
+pub struct PublishTemplateRequest {
+    /// Display name for the template (defaults to server name if omitted)
+    #[validate(length(max = 255))]
+    pub name: Option<String>,
+    #[validate(length(max = 2000))]
+    pub description: Option<String>,
+    /// Keys of existing secrets that deployers must supply (values are never stored)
+    #[validate(length(max = 50))]
+    pub required_env_var_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

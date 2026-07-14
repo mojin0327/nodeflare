@@ -2,12 +2,12 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Lock, Users, Globe, Server, Link, Search, Folder, AlertCircle, GitBranch, Terminal, AlertTriangle, XCircle, Plus, Trash2, KeyRound, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Lock, Users, Globe, Server, Link, Search, Folder, AlertCircle, GitBranch, Terminal, AlertTriangle, XCircle, Plus, Trash2, KeyRound, Loader2, ChevronDown, ChevronRight, Key, Rocket } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getLinkedAccounts, getRepos, getBranches, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
-import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo, UpstreamOAuthProvider } from '@/types';
+import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo, UpstreamOAuthProvider, ServerTemplatePublic } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,6 +50,11 @@ export default function NewServerPage() {
   const tCommon = useTranslations('common');
   const tApiErrors = useTranslations('apiErrors');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawTemplateId = searchParams.get('template');
+  const templateId = rawTemplateId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawTemplateId)
+    ? rawTemplateId
+    : null;
   const queryClient = useQueryClient();
 
   useSetPageHeader(t('create.title'), <Server className="w-4 h-4" />);
@@ -67,6 +72,13 @@ export default function NewServerPage() {
   const { data: upstreamProviders = [] } = useQuery<UpstreamOAuthProvider[]>({
     queryKey: ['upstream-oauth-providers'],
     queryFn: () => api.get('/oauth/upstream-providers'),
+  });
+
+  const { data: templateData } = useQuery<ServerTemplatePublic>({
+    queryKey: ['template', templateId],
+    queryFn: () => api.get<ServerTemplatePublic>(`/templates/${templateId}`),
+    enabled: !!templateId,
+    staleTime: Infinity,
   });
   const currentPlan = activeWorkspace?.plan || 'free';
   const maxMemoryMb = plans?.find((p) => p.plan === currentPlan)?.limits.max_memory_mb ?? 256;
@@ -156,6 +168,7 @@ export default function NewServerPage() {
   // own collapsible card below the Visibility section.
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
+  const templateAppliedRef = useRef(false);
 
   const applyDetection = useCallback((d: RepoDetection) => {
     setFormData((prev) => ({
@@ -253,6 +266,43 @@ export default function NewServerPage() {
       .replace(/^-|-$/g, '')
       .substring(0, 63);
   }, []);
+
+  // Pre-fill form from a shared template when ?template=<id> is in the URL.
+  // Runs once when templateData loads; ref guards against re-application on re-render.
+  useEffect(() => {
+    if (!templateData || templateAppliedRef.current) return;
+    templateAppliedRef.current = true;
+    const slug = generateSlug(templateData.name);
+    setFormData((prev) => ({
+      ...prev,
+      name: templateData.name,
+      slug,
+      description: templateData.description ?? '',
+      github_repo: templateData.github_repo,
+      github_branch: templateData.github_branch,
+      runtime: templateData.runtime,
+      transport: templateData.transport,
+      mcp_path: templateData.mcp_path,
+      entry_command: templateData.entry_command ?? undefined,
+      build_command: templateData.build_command ?? undefined,
+      root_directory: templateData.root_directory,
+      auth_enabled: templateData.auth_enabled,
+      memory_mb: templateData.memory_mb ?? DEFAULT_MEMORY_MB,
+      port: templateData.port ?? undefined,
+    }));
+    if (templateData.upstream_oauth_provider) {
+      setUpstreamOauthEnabled(true);
+      setUpstreamOauthProvider(templateData.upstream_oauth_provider);
+      setUpstreamOauthScopes(templateData.upstream_oauth_scopes.join(' '));
+    }
+    if (templateData.required_env_var_keys.length > 0) {
+      setEnvVars(templateData.required_env_var_keys.map((k) => ({ key: k, value: '' })));
+      setEnvOpen(true);
+    }
+    setPublicRepoUrl(`https://github.com/${templateData.github_repo}`);
+    setSourceType('public-url');
+    runDetect(templateData.github_repo, templateData.github_branch);
+  }, [templateData, generateSlug, runDetect]);
 
   // Parse GitHub URL to extract owner/repo and, when present, the branch and
   // subdirectory from a `/tree/<branch>/<path>` or `/blob/<branch>/<path>` URL.
@@ -378,6 +428,7 @@ export default function NewServerPage() {
       upstream_oauth_token_url: upstreamOauthEnabled && isCustomProvider ? upstreamOauthTokenUrl || undefined : undefined,
       upstream_oauth_client_id: upstreamOauthEnabled && isCustomProvider ? upstreamOauthClientId || undefined : undefined,
       upstream_oauth_client_secret: upstreamOauthEnabled && isCustomProvider ? upstreamOauthClientSecret || undefined : undefined,
+      template_id: templateId || undefined,
     });
   };
 
@@ -465,6 +516,24 @@ export default function NewServerPage() {
 
   return (
     <div className="max-w-2xl">
+      {templateData && (
+        <div className="mb-6 p-4 rounded-xl bg-violet-50 border border-violet-200 flex items-start gap-3">
+          <Rocket className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-violet-900">{t('create.templateBannerTitle')}: <span className="font-normal">{templateData.name}</span></p>
+            <p className="text-xs text-violet-700 mt-0.5">{t('create.templateBannerDesc')}</p>
+            {templateData.required_env_var_keys.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {templateData.required_env_var_keys.map((k) => (
+                  <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-xs font-mono text-amber-700">
+                    <Key className="w-2.5 h-2.5" />{k}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* GitHub Repository Selection */}
         <section>

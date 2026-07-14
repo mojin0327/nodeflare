@@ -80,7 +80,8 @@
     "logout": "ログアウト",
     "signup": "新規登録",
     "overview": "ダッシュボード",
-    "billing": "プランと請求"
+    "billing": "プランと請求",
+    "explore": "サーバーを探す"
   },
   "home": {
     "discord": {
@@ -430,7 +431,10 @@
       "submit": "サーバーを作成",
       "creating": "作成中...",
       "failed": "サーバーの作成に失敗しました",
-      "trySuggestion": "スラッグを試す:"
+      "trySuggestion": "スラッグを試す:",
+      "templateBannerTitle": "テンプレートからデプロイ",
+      "templateBannerDesc": "テンプレートの設定が自動入力されました。以下の必須環境変数を入力してデプロイしてください。",
+      "templateRequiredEnvVars": "このテンプレートに必要な環境変数"
     },
     "regions": {
       "title": "リージョン",
@@ -492,7 +496,21 @@
       "fullscreen": "フルスクリーン",
       "exitFullscreen": "フルスクリーン終了 (ESC)",
       "clickToViewLogs": "クリックでログを表示",
-      "deploys": "デプロイ"
+      "deploys": "デプロイ",
+      "shareServer": "テンプレートとして共有",
+      "sharePublicOnly": "公開サーバーのみテンプレートとして共有できます",
+      "shareDialogTitle": "テンプレートとして投稿",
+      "shareDialogDesc": "公開Exploreページにサーバーを掲載し、誰でもワンクリックでデプロイできるようになります。環境変数の値は共有されません — 以下で選択したキー名のみ表示されます。",
+      "shareTemplateName": "テンプレート名",
+      "shareTemplateDesc": "説明",
+      "shareEnvVarKeys": "必要な環境変数キー（値は共有しません）",
+      "shareEnvVarKeysHint": "デプロイする人が入力すべきシークレットを選択",
+      "sharePublish": "投稿する",
+      "shareUnpublish": "投稿を取り消す",
+      "sharePublished": "Exploreに掲載中",
+      "shareSuccess": "テンプレートを投稿しました",
+      "unshareSuccess": "テンプレートの投稿を取り消しました",
+      "shareError": "テンプレートの投稿に失敗しました"
     },
     "deploy": {
       "started": "デプロイを開始しました...",
@@ -1657,5 +1675,25 @@
     "noticeHeading": "電子公告",
     "noticeDesc": "会社法その他の法令に基づく公告を、当ページに掲載します。",
     "noticeEmpty": "現在、掲載中の公告はありません。"
+  },
+  "explore": {
+    "title": "テンプレートを探す",
+    "subtitle": "コミュニティのMCPサーバーをワンクリックでデプロイ",
+    "searchPlaceholder": "名前・ランタイム・リポジトリで検索…",
+    "searchButton": "検索",
+    "results": "件",
+    "emptyTitle": "テンプレートがまだありません",
+    "emptyDesc": "最初にサーバーを共有してみましょう！",
+    "deploy": "デプロイ",
+    "usedCount": "{count} 回デプロイ",
+    "requiredEnvVars": "必要な環境変数",
+    "noEnvVars": "環境変数は不要です",
+    "viewRepo": "リポジトリを見る",
+    "authModal": {
+      "title": "デプロイするには登録が必要です",
+      "desc": "「{name}」をデプロイするには、無料アカウントを作成してください。",
+      "signup": "サインアップ",
+      "login": "ログイン"
+    }
   }
 }

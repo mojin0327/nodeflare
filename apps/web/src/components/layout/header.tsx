@@ -21,6 +21,7 @@ export function Header() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-8">
+          <Link href="/explore" className="text-sm font-medium text-[#323232] hover:text-gray-900">{t('explore')}</Link>
           <Link href="/docs" className="text-sm font-medium text-[#323232] hover:text-gray-900">{t('docs')}</Link>
           <Link href="/pricing" className="text-sm font-medium text-[#323232] hover:text-gray-900">Pricing</Link>
           <Link href="/blog" className="text-sm font-medium text-[#323232] hover:text-gray-900">{t('blog')}</Link>
@@ -82,6 +83,13 @@ export function Header() {
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-gray-100 bg-white">
           <nav className="max-w-6xl mx-auto px-4 py-4 space-y-1">
+            <Link
+              href="/explore"
+              className="block px-3 py-2.5 text-sm font-medium text-[#323232] hover:text-gray-900 hover:bg-gray-50 rounded-lg"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              {t('explore')}
+            </Link>
             <Link
               href="/docs"
               className="block px-3 py-2.5 text-sm font-medium text-[#323232] hover:text-gray-900 hover:bg-gray-50 rounded-lg"

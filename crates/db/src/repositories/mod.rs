@@ -45,3 +45,6 @@ pub use linked_github_repo::LinkedGitHubAccountRepository;
 
 mod upstream_oauth_provider_repo;
 pub use upstream_oauth_provider_repo::UpstreamOAuthProviderRepository;
+
+mod template_repo;
+pub use template_repo::ServerTemplateRepository;

@@ -25,6 +25,7 @@ pub mod oauth;
 pub mod stats;
 pub mod github_accounts;
 pub mod mcp_tokens;
+pub mod templates;
 
 use axum::{routing::{get, post, patch, delete}, Router};
 use std::sync::Arc;
@@ -297,6 +298,16 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/oauth/upstream-providers", get(oauth::list_upstream_providers))
         .route("/oauth/upstream-authorize", get(oauth::upstream_authorize))
         .route("/oauth/upstream-callback", get(oauth::upstream_callback))
+        // Templates (explore / marketplace) — GET routes are public (no auth)
+        .route("/templates", get(templates::list))
+        .route("/templates/:template_id", get(templates::get))
+        // Template management (workspace-scoped, auth required)
+        .route(
+            "/workspaces/:workspace_id/servers/:server_id/template",
+            get(templates::get_by_server)
+                .post(templates::publish)
+                .delete(templates::unpublish),
+        )
 }
 
 /// WebSocket router for real-time updates

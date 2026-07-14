@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { McpServer, Deployment, Secret, AccessMode, UpstreamOAuthProvider } from '@/types';
+import { McpServer, Deployment, Secret, AccessMode, UpstreamOAuthProvider, ServerTemplate, PublishTemplateRequest } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useServerStatusWebSocket } from '@/hooks/use-websocket';
-import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle } from 'lucide-react';
+import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2 } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -105,6 +105,10 @@ export default function ServerDetailPage() {
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deployError, setDeployError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareTemplateName, setShareTemplateName] = useState('');
+  const [shareTemplateDesc, setShareTemplateDesc] = useState('');
+  const [shareSelectedKeys, setShareSelectedKeys] = useState<string[]>([]);
 
   const { activeWorkspace, workspaces, isLoading: isLoadingWorkspaces } = useWorkspace();
 
@@ -279,6 +283,69 @@ export default function ServerDetailPage() {
     },
   });
 
+  // Fetch existing template for this server (to show published state)
+  const { data: existingTemplate, refetch: refetchTemplate } = useQuery<ServerTemplate | null>({
+    queryKey: ['server-template', workspaceId, serverId],
+    queryFn: () => api.get<ServerTemplate | null>(`/workspaces/${workspaceId}/servers/${serverId}/template`),
+    enabled: !!workspaceId && !!serverId,
+  });
+
+  // Fetch secrets so user can pick required env var keys
+  const { data: serverSecrets = [] } = useQuery<Secret[]>({
+    queryKey: ['secrets', workspaceId, serverId],
+    queryFn: () => api.get<Secret[]>(`/workspaces/${workspaceId}/servers/${serverId}/secrets`),
+    enabled: !!workspaceId && !!serverId && shareDialogOpen,
+  });
+
+  // Auto-select all secrets when opening the dialog for a brand-new template
+  useEffect(() => {
+    if (!shareDialogOpen || existingTemplate || serverSecrets.length === 0) return;
+    setShareSelectedKeys(serverSecrets.map((s) => s.key));
+  }, [shareDialogOpen, serverSecrets, existingTemplate]);
+
+  const publishTemplateMutation = useMutation({
+    mutationFn: (body: PublishTemplateRequest) =>
+      api.post<ServerTemplate>(
+        `/workspaces/${workspaceId}/servers/${serverId}/template`,
+        body,
+      ),
+    onSuccess: () => {
+      toast.success(t('detail.shareSuccess'));
+      setShareDialogOpen(false);
+      refetchTemplate();
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || t('detail.shareError'));
+    },
+  });
+
+  const unpublishTemplateMutation = useMutation({
+    mutationFn: () =>
+      api.delete(`/workspaces/${workspaceId}/servers/${serverId}/template`),
+    onSuccess: () => {
+      toast.success(t('detail.unshareSuccess'));
+      refetchTemplate();
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || t('detail.shareError'));
+    },
+  });
+
+  const handleShareClick = () => {
+    if (!server) return;
+    if (server.visibility !== 'public') {
+      console.error(
+        `[NodeFlare] Share blocked: server "${server.name}" (${serverId}) has visibility="${server.visibility}". Only public servers can be shared as templates.`,
+      );
+      toast.error(t('detail.sharePublicOnly'));
+      return;
+    }
+    setShareTemplateName(existingTemplate?.name ?? server.name);
+    setShareTemplateDesc(existingTemplate?.description ?? server.description ?? '');
+    setShareSelectedKeys(existingTemplate?.required_env_var_keys ?? []);
+    setShareDialogOpen(true);
+  };
+
   if (isLoadingServers) {
     return (
       <div className="space-y-4">
@@ -377,6 +444,17 @@ export default function ServerDetailPage() {
             )}
           </div>
 
+          {/* Share Button */}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleShareClick}
+            title={t('detail.shareServer')}
+            className={existingTemplate ? 'text-violet-600 border-violet-300 hover:border-violet-400' : 'text-gray-400 hover:text-violet-600 hover:border-violet-300'}
+          >
+            <Share2 className="w-4 h-4" />
+          </Button>
+
           {/* Delete Button */}
           <AlertDialog onOpenChange={(open) => !open && setDeleteConfirmName('')}>
             <AlertDialogTrigger asChild>
@@ -434,6 +512,122 @@ export default function ServerDetailPage() {
           </AlertDialog>
         </div>
       </div>
+
+      {/* Share / Publish Template Dialog */}
+      {shareDialogOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={() => setShareDialogOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Share2 className="w-4 h-4 text-violet-600" />
+                {t('detail.shareDialogTitle')}
+              </h2>
+              <button onClick={() => setShareDialogOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500">{t('detail.shareDialogDesc')}</p>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-medium text-gray-700">{t('detail.shareTemplateName')}</Label>
+                <Input
+                  value={shareTemplateName}
+                  onChange={(e) => setShareTemplateName(e.target.value)}
+                  className="mt-1 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-gray-700">{t('detail.shareTemplateDesc')}</Label>
+                <Input
+                  value={shareTemplateDesc}
+                  onChange={(e) => setShareTemplateDesc(e.target.value)}
+                  className="mt-1 text-sm"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-gray-700">{t('detail.shareEnvVarKeys')}</Label>
+                <p className="text-xs text-gray-400 mt-0.5 mb-2">{t('detail.shareEnvVarKeysHint')}</p>
+                {serverSecrets.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No secrets found on this server.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {serverSecrets.map((s) => {
+                      const selected = shareSelectedKeys.includes(s.key);
+                      return (
+                        <button
+                          key={s.key}
+                          type="button"
+                          onClick={() =>
+                            setShareSelectedKeys((prev) =>
+                              selected ? prev.filter((k) => k !== s.key) : [...prev, s.key]
+                            )
+                          }
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono border transition-colors ${
+                            selected
+                              ? 'bg-amber-50 border-amber-300 text-amber-700'
+                              : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-amber-200'
+                          }`}
+                        >
+                          <Key className="w-3 h-3" />
+                          {s.key}
+                          {selected && <Check className="w-3 h-3" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+              {existingTemplate && (
+                <button
+                  type="button"
+                  onClick={() => unpublishTemplateMutation.mutate()}
+                  disabled={unpublishTemplateMutation.isPending}
+                  className="mr-auto px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 transition-colors disabled:opacity-50"
+                >
+                  {unpublishTemplateMutation.isPending ? tCommon('loading') : t('detail.shareUnpublish')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShareDialogOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+              >
+                {tCommon('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  publishTemplateMutation.mutate({
+                    name: shareTemplateName || undefined,
+                    description: shareTemplateDesc || undefined,
+                    required_env_var_keys: shareSelectedKeys,
+                  })
+                }
+                disabled={publishTemplateMutation.isPending || !shareTemplateName.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+              >
+                {publishTemplateMutation.isPending ? (
+                  <div className="w-4 h-4 border-2 rounded-full border-white/30 border-t-white animate-spin" />
+                ) : t('detail.sharePublish')}
+              </button>
+            </div>
+
+            {existingTemplate && (
+              <p className="text-xs text-violet-600 text-center flex items-center justify-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" />
+                {t('detail.sharePublished')}
+              </p>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Upgrade Banner */}
       {isAtDeployLimit && currentWorkspace?.plan !== 'enterprise' && (

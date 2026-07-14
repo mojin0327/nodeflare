@@ -80,7 +80,8 @@
     "logout": "Logout",
     "signup": "Sign Up",
     "overview": "Dashboard",
-    "billing": "Plans & Billing"
+    "billing": "Plans & Billing",
+    "explore": "Explore"
   },
   "home": {
     "discord": {
@@ -430,7 +431,10 @@
       "submit": "Create Server",
       "creating": "Creating...",
       "failed": "Failed to create server",
-      "trySuggestion": "Try this slug:"
+      "trySuggestion": "Try this slug:",
+      "templateBannerTitle": "Deploying from template",
+      "templateBannerDesc": "Settings are pre-filled from the template. You only need to fill in the required env vars below.",
+      "templateRequiredEnvVars": "Required env vars for this template"
     },
     "regions": {
       "title": "Region",
@@ -492,7 +496,21 @@
       "fullscreen": "Fullscreen",
       "exitFullscreen": "Exit fullscreen (ESC)",
       "clickToViewLogs": "Click to view logs",
-      "deploys": "Deploys"
+      "deploys": "Deploys",
+      "shareServer": "Share as Template",
+      "sharePublicOnly": "Only public servers can be shared as templates",
+      "shareDialogTitle": "Publish as Template",
+      "shareDialogDesc": "This will list your server in the public Explore page so anyone can deploy it with one click. Environment variable values are never shared — only the key names you select below.",
+      "shareTemplateName": "Template name",
+      "shareTemplateDesc": "Description",
+      "shareEnvVarKeys": "Required env var keys (values are not shared)",
+      "shareEnvVarKeysHint": "Select which secrets deployers must fill in",
+      "sharePublish": "Publish",
+      "shareUnpublish": "Unpublish",
+      "sharePublished": "Published to Explore",
+      "shareSuccess": "Template published successfully",
+      "unshareSuccess": "Template unpublished",
+      "shareError": "Failed to publish template"
     },
     "deploy": {
       "started": "Deployment started...",
@@ -1659,5 +1677,25 @@
     "noticeHeading": "Electronic Public Notices",
     "noticeDesc": "Public notices required under the Companies Act and other laws are posted on this page.",
     "noticeEmpty": "There are currently no public notices posted."
+  },
+  "explore": {
+    "title": "Explore Templates",
+    "subtitle": "One-click deploy community MCP servers",
+    "searchPlaceholder": "Search by name, runtime, repo…",
+    "searchButton": "Search",
+    "results": "templates",
+    "emptyTitle": "No templates yet",
+    "emptyDesc": "Be the first to share your server!",
+    "deploy": "Deploy",
+    "usedCount": "{count} deploys",
+    "requiredEnvVars": "Required env vars",
+    "noEnvVars": "No env vars required",
+    "viewRepo": "View repo",
+    "authModal": {
+      "title": "Sign up to deploy",
+      "desc": "Create a free account to deploy \"{name}\" and start using it in seconds.",
+      "signup": "Sign up",
+      "login": "Sign in"
+    }
   }
 }

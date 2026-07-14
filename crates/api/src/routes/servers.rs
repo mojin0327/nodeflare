@@ -763,6 +763,15 @@ pub async fn create(
 
     tracing::info!("Auto-deploy build job enqueued for server {} (deployment {})", server.id, deployment.id);
 
+    // Increment template use count now that the server was actually created.
+    if let Some(tid) = body.template_id {
+        match mcp_db::ServerTemplateRepository::increment_use_count(&state.db, tid).await {
+            Ok(false) => tracing::warn!(template_id = %tid, "template not found when incrementing use_count"),
+            Err(e) => tracing::warn!(template_id = %tid, error = %e, "failed to increment template use_count"),
+            Ok(true) => {}
+        }
+    }
+
     // Return server response with building status
     let runtime = server.runtime();
     let visibility = server.visibility();

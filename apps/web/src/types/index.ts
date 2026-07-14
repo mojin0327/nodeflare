@@ -157,6 +157,61 @@ export interface Secret {
   updated_at: string;
 }
 
+/** Public template as returned by GET /api/v1/templates — no internal workspace/owner IDs */
+export interface ServerTemplatePublic {
+  id: string;
+  name: string;
+  description: string | null;
+  github_repo: string;
+  github_branch: string;
+  runtime: Runtime;
+  transport: Transport;
+  mcp_path: string;
+  entry_command: string | null;
+  build_command: string | null;
+  root_directory: string;
+  auth_enabled: boolean;
+  memory_mb: number | null;
+  port: number | null;
+  upstream_oauth_provider: string | null;
+  upstream_oauth_scopes: string[];
+  required_env_var_keys: string[];
+  use_count: number;
+  created_at: string;
+}
+
+/** Authenticated template response (workspace members only) — includes internal IDs */
+export interface ServerTemplate {
+  id: string;
+  server_id: string;
+  owner_id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  github_repo: string;
+  github_branch: string;
+  runtime: Runtime;
+  transport: Transport;
+  mcp_path: string;
+  entry_command: string | null;
+  build_command: string | null;
+  root_directory: string;
+  auth_enabled: boolean;
+  memory_mb: number | null;
+  port: number | null;
+  upstream_oauth_provider: string | null;
+  upstream_oauth_scopes: string[];
+  required_env_var_keys: string[];
+  use_count: number;
+  created_at: string;
+}
+
+export interface PublishTemplateRequest {
+  name?: string;
+  description?: string;
+  required_env_var_keys: string[];
+}
+
 export interface RequestLog {
   id: string;
   server_id: string;
@@ -212,6 +267,8 @@ export interface CreateServerRequest {
   upstream_oauth_client_id?: string;
   /** Custom provider: client secret (write-only) */
   upstream_oauth_client_secret?: string;
+  /** If created from a template, pass the template ID to increment its use count */
+  template_id?: string;
 }
 
 export interface UpdateServerRequest {

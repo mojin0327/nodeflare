@@ -42,3 +42,6 @@ pub use linked_github::*;
 
 mod upstream_oauth_provider;
 pub use upstream_oauth_provider::*;
+
+mod template;
+pub use template::*;
