@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { useServerStatusWebSocket } from '@/hooks/use-websocket';
+import { useServerStatusWebSocket, useDeploymentWebSocket } from '@/hooks/use-websocket';
 import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2 } from 'lucide-react';
 import {
   AreaChart,
@@ -135,22 +135,20 @@ export default function ServerDetailPage() {
 
   const deployments = deploymentsQuery.data;
 
-  // Check if any deployment is currently building
-  const hasActiveDeployment = deployments?.some(
-    d => d.status === 'pending' || d.status === 'building' || d.status === 'deploying' || d.status === 'pushing'
+  // Find the active deployment ID for WebSocket subscription
+  const activeDeploymentId = useMemo(
+    () => deployments?.find(
+      d => d.status === 'pending' || d.status === 'building' || d.status === 'deploying' || d.status === 'pushing'
+    )?.id ?? '',
+    [deployments]
   );
 
-  // Poll deployments every 3 seconds while building
   const refetchDeployments = deploymentsQuery.refetch;
-  useEffect(() => {
-    if (!hasActiveDeployment) return;
 
-    const interval = setInterval(() => {
-      refetchDeployments();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [hasActiveDeployment, refetchDeployments]);
+  // Replace polling with WebSocket: refetch list whenever deployment status changes
+  useDeploymentWebSocket(activeDeploymentId, {
+    onStatusUpdate: () => { refetchDeployments(); },
+  });
 
   // Fetch secrets
   const secretsQuery = useQuery({

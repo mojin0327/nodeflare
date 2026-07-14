@@ -1629,7 +1629,7 @@
     "INVALID_REPOSITORY": "リポジトリの形式が正しくありません。「ユーザー名/リポジトリ名」の形式で入力してください（例: username/my-repo）。",
     "INVALID_GITHUB_REPO": "GitHubリポジトリの形式が正しくありません。「owner/repo」の形式で入力してください。",
     "INVALID_RUNTIME": "選択されたランタイムは無効です。Node.js、Python、Go、Rustから選択してください。",
-    "INVALID_TRANSPORT": "トランスポートタイプが無効です。SSEまたはSTDIOを選択してください。",
+    "INVALID_TRANSPORT": "トランスポートタイプが無効です。Streamable HTTPまたはSTDIOを選択してください。",
     "INVALID_WORKSPACE": "指定されたワークスペースが存在しないか、アクセス権限がありません。",
     "INVALID_MCP_REPOSITORY": "このリポジトリはMCPサーバーとして認識できませんでした。MCP SDKの依存関係が正しく設定されているか確認してください。",
     "SERVER_LIMIT_REACHED": "サーバー数の上限に達しました。プランをアップグレードしてください。",

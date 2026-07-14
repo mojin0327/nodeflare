@@ -1,4 +1,5 @@
 import { Header, Footer } from '@/components/layout';
+import Image from 'next/image';
 import Link from 'next/link';
 import { getBlogPost, getBlogPosts, sanitizeHtml } from '@/lib/hygraph';
 import { notFound } from 'next/navigation';
@@ -163,7 +164,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           <div className="sm:hidden rounded-xl overflow-hidden border border-gray-300 bg-slate-100">
             <div className="p-4">
               <div className="mb-1">
-                <img src="/logo2.png" alt="NodeFlare" className="h-7 w-auto" />
+                <Image src="/logo2.png" alt="NodeFlare" height={28} width={140} className="h-7 w-auto" style={{ width: 'auto' }} />
               </div>
               <p className="text-sm font-extrabold text-gray-800 !m-0 !leading-normal">
                 {locale === 'ja' ? 'MCP専用ホスティングサービス' : 'MCP Hosting Service'}
@@ -197,7 +198,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             <div className="relative flex items-center justify-between">
               <div>
                 <div className="mb-0.5">
-                  <img src="/logo2.png" alt="NodeFlare" className="h-8 w-auto" />
+                  <Image src="/logo2.png" alt="NodeFlare" height={32} width={160} className="h-8 w-auto" style={{ width: 'auto' }} />
                 </div>
                 <p className="text-[17px] font-extrabold text-gray-800 !m-0 !leading-normal">
                   {locale === 'ja' ? 'MCP専用ホスティングサービス' : 'MCP Hosting Service'}

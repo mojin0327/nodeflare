@@ -14,6 +14,7 @@ export const metadata: Metadata = {
     },
   },
 };
+import Image from 'next/image';
 import { FaDiscord } from 'react-icons/fa6';
 import { Header, Footer } from '@/components/layout';
 import {
@@ -111,9 +112,9 @@ export default async function HomePage() {
                   <p className="mb-8 max-w-md text-sm leading-relaxed text-gray-500">{t(item.descKey)}</p>
 
                   {/* 画像スペース（全カード共通の固定高さ・比率維持で枠内に収め、画像の有無/元サイズに左右されない） */}
-                  <div className={`-mx-6 -mb-6 sm:-mx-8 sm:-mb-8 ${idx < 2 ? 'h-64' : 'h-40'}`}>
+                  <div className={`-mx-6 -mb-6 sm:-mx-8 sm:-mb-8 relative ${idx < 2 ? 'h-64' : 'h-40'}`}>
                     {item.image ? (
-                      <img src={item.image} alt={t(item.titleKey)} className="h-full w-full object-contain" />
+                      <Image src={item.image} alt={t(item.titleKey)} fill className="object-contain" />
                     ) : null}
                   </div>
                 </div>
@@ -265,7 +266,7 @@ export default async function HomePage() {
                               <FaDiscord className="h-5 w-5 text-white" />
                             </div>
                           ) : (
-                            <img src={m.avatarUrl} alt={m.name} className="h-10 w-10 rounded-full object-cover" />
+                            <Image src={m.avatarUrl ?? ''} alt={m.name} width={40} height={40} className="h-10 w-10 rounded-full object-cover" />
                           )}
                         </div>
                         <div className="min-w-0">

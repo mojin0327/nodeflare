@@ -28,7 +28,7 @@ export default function BillingSuccessPage() {
     queryKey: ['subscription-check', currentWorkspace?.id],
     queryFn: () => api.get(`/workspaces/${currentWorkspace?.id}/billing/subscription`),
     enabled: !!currentWorkspace?.id && !isComplete,
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: 5000,
   });
 
   // Check if subscription is active (not free)

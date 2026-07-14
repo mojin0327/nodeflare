@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
@@ -67,7 +68,7 @@ export default function VerifyEmailPage() {
       <div className="flex-1 flex flex-col px-4 py-6 sm:px-8 sm:py-8 lg:px-16">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 mb-8 sm:mb-16">
-          <img src="/logo2.png" alt="Nodeflare" className="h-7 sm:h-8 w-auto" />
+          <Image src="/logo2.png" alt="Nodeflare" height={32} width={160} className="h-7 sm:h-8 w-auto" style={{ width: 'auto' }} />
         </Link>
 
         {/* Content container */}
@@ -169,7 +170,7 @@ export default function VerifyEmailPage() {
 
       {/* Right side - Decorative image */}
       <div className="hidden lg:block lg:flex-1 relative">
-        <img src="/sign.png" alt="" className="absolute inset-0 w-full h-full object-cover" />
+        <Image src="/sign.png" alt="" fill className="object-cover" />
       </div>
     </div>
   );

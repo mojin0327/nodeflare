@@ -1588,7 +1588,7 @@
     "INVALID_REPOSITORY": "Repository format is invalid. Please enter in 'username/repository' format (e.g., username/my-repo).",
     "INVALID_GITHUB_REPO": "GitHub repository format is invalid. Please enter in owner/repo format.",
     "INVALID_RUNTIME": "The selected runtime is invalid. Please choose from Node.js, Python, Go, or Rust.",
-    "INVALID_TRANSPORT": "Transport type is invalid. Please choose SSE or STDIO.",
+    "INVALID_TRANSPORT": "Transport type is invalid. Please choose Streamable HTTP or STDIO.",
     "INVALID_WORKSPACE": "The specified workspace does not exist or you don't have access.",
     "INVALID_MCP_REPOSITORY": "This repository could not be recognized as an MCP server. Please check that MCP SDK dependencies are properly configured.",
     "REPO_NOT_FOUND": "The specified repository was not found. Please check if the repository exists and is accessible.",

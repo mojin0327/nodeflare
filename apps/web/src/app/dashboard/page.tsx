@@ -9,6 +9,7 @@ import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import { LayoutDashboard, Plus, AlertCircle, ChevronRight, Play } from 'lucide-react';
 
 interface BatchStatsResponse {
@@ -380,7 +381,7 @@ function NewsSection({ t }: { t: (key: string) => string }) {
                 className="flex-shrink-0 group"
               >
                 <div className="relative w-36 h-20 rounded-lg overflow-hidden bg-gray-100">
-                  <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
+                  <Image src={item.thumbnail} alt={item.title} fill className="object-cover" />
                   <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition-colors">
                     <div className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center">
                       <Play className="w-3 h-3 text-gray-900 ml-0.5 fill-current" />

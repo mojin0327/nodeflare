@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
@@ -15,7 +16,7 @@ export function Footer() {
         <div className="grid md:grid-cols-4 gap-12 mb-12">
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <img src="/logo2.png" alt="Nodeflare" className="h-8 w-auto" />
+              <Image src="/logo2.png" alt="Nodeflare" height={32} width={160} className="h-8 w-auto" style={{ width: 'auto' }} />
             </div>
             <p className="text-gray-400 text-sm">
               {t('tagline')}

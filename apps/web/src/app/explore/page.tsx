@@ -72,9 +72,7 @@ export default function ExplorePage() {
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="border-b border-gray-200">
-        <Header />
-      </div>
+      <Header />
 
       {/* Page header */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
