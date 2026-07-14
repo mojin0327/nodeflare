@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { authUrl } from '@/lib/auth-urls';
 
 interface PricingButtonsProps {
   variant: 'free' | 'pro';
@@ -13,9 +14,7 @@ export function PricingButtons({ variant }: PricingButtonsProps) {
   const searchParams = useSearchParams();
 
   const returnTo = searchParams.get('return_to');
-  const githubLoginUrl = returnTo
-    ? `/api/v1/auth/github?return_to=${encodeURIComponent(returnTo)}`
-    : '/api/v1/auth/github';
+  const githubLoginUrl = authUrl('github', returnTo);
 
   if (variant === 'free') {
     return (

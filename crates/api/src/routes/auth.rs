@@ -22,10 +22,10 @@ use crate::middleware::rate_limit::{
     clear_failed_attempts, extract_client_ip, get_lockout_remaining, is_ip_locked_out,
     record_failed_attempt,
 };
+use crate::routes::helpers::{build_auth_cookies, clear_auth_cookies, CSRF_TOKEN_TTL_SECS};
 use crate::state::AppState;
 
 const CSRF_TOKEN_PREFIX: &str = "csrf:oauth:";
-const CSRF_TOKEN_TTL_SECS: i64 = 600; // 10 minutes
 
 /// SECURITY: Validate return_to URL to prevent open redirect attacks
 /// Returns None if the URL is potentially malicious, otherwise returns sanitized URL
@@ -338,27 +338,8 @@ pub async fn github_callback(
     let access_token_max_age = state.config.auth.jwt_expiration_hours * 3600;
     let refresh_token_max_age = state.config.auth.refresh_token_expiration_days * 24 * 3600;
 
-    // SameSite=None required for cross-origin requests, Secure required for SameSite=None
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let access_cookie = format!(
-        "access_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        access_token,
-        secure_flag,
-        samesite,
-        access_token_max_age,
-    );
-
-    let refresh_cookie = format!(
-        "refresh_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        refresh.token,
-        secure_flag,
-        samesite,
-        refresh_token_max_age,
+    let (access_cookie, refresh_cookie) = build_auth_cookies(
+        is_production, &access_token, access_token_max_age, &refresh.token, refresh_token_max_age,
     );
 
     // Clear failed attempts on successful login
@@ -695,26 +676,8 @@ pub async fn refresh_token(
     let access_token_max_age = state.config.auth.jwt_expiration_hours * 3600;
     let refresh_token_max_age = state.config.auth.refresh_token_expiration_days * 24 * 3600;
 
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let access_cookie = format!(
-        "access_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        new_access_token,
-        secure_flag,
-        samesite,
-        access_token_max_age,
-    );
-
-    let refresh_cookie = format!(
-        "refresh_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        new_refresh.token,
-        secure_flag,
-        samesite,
-        refresh_token_max_age,
+    let (access_cookie, refresh_cookie) = build_auth_cookies(
+        is_production, &new_access_token, access_token_max_age, &new_refresh.token, refresh_token_max_age,
     );
 
     // SECURITY: Only include refresh_token in JSON if explicitly requested via header.
@@ -838,24 +801,7 @@ pub async fn logout(
     tracing::info!("User {} logged out", auth_user.user_id);
 
     // Clear cookies by setting them with expired max-age
-    let is_production = state.config.is_production();
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let clear_access_cookie = format!(
-        "access_token=; HttpOnly{}; SameSite={}; Path=/; Max-Age=0",
-        secure_flag,
-        samesite,
-    );
-
-    let clear_refresh_cookie = format!(
-        "refresh_token=; HttpOnly{}; SameSite={}; Path=/; Max-Age=0",
-        secure_flag,
-        samesite,
-    );
+    let (clear_access_cookie, clear_refresh_cookie) = clear_auth_cookies(state.config.is_production());
 
     let mut headers = HeaderMap::new();
     // SECURITY: Handle potential invalid header values instead of panicking
@@ -1196,26 +1142,8 @@ pub async fn google_callback(
     let access_token_max_age = state.config.auth.jwt_expiration_hours * 3600;
     let refresh_token_max_age = state.config.auth.refresh_token_expiration_days * 24 * 3600;
 
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let access_cookie = format!(
-        "access_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        jwt_access_token,
-        secure_flag,
-        samesite,
-        access_token_max_age,
-    );
-
-    let refresh_cookie = format!(
-        "refresh_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        refresh.token,
-        secure_flag,
-        samesite,
-        refresh_token_max_age,
+    let (access_cookie, refresh_cookie) = build_auth_cookies(
+        is_production, &jwt_access_token, access_token_max_age, &refresh.token, refresh_token_max_age,
     );
 
     // Clear failed attempts on successful login
@@ -1576,26 +1504,8 @@ pub async fn login(
     let access_token_max_age = state.config.auth.jwt_expiration_hours * 3600;
     let refresh_token_max_age = state.config.auth.refresh_token_expiration_days * 24 * 3600;
 
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let access_cookie = format!(
-        "access_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        access_token,
-        secure_flag,
-        samesite,
-        access_token_max_age,
-    );
-
-    let refresh_cookie = format!(
-        "refresh_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        refresh.token,
-        secure_flag,
-        samesite,
-        refresh_token_max_age,
+    let (access_cookie, refresh_cookie) = build_auth_cookies(
+        is_production, &access_token, access_token_max_age, &refresh.token, refresh_token_max_age,
     );
 
     let auth_response = AuthResponse {
@@ -1717,26 +1627,8 @@ pub async fn verify_email(
     let access_token_max_age = state.config.auth.jwt_expiration_hours * 3600;
     let refresh_token_max_age = state.config.auth.refresh_token_expiration_days * 24 * 3600;
 
-    let (samesite, secure_flag) = if is_production {
-        ("None", "; Secure")
-    } else {
-        ("Lax", "")
-    };
-
-    let access_cookie = format!(
-        "access_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        access_token,
-        secure_flag,
-        samesite,
-        access_token_max_age,
-    );
-
-    let refresh_cookie = format!(
-        "refresh_token={}; HttpOnly{}; SameSite={}; Path=/; Max-Age={}",
-        refresh.token,
-        secure_flag,
-        samesite,
-        refresh_token_max_age,
+    let (access_cookie, refresh_cookie) = build_auth_cookies(
+        is_production, &access_token, access_token_max_age, &refresh.token, refresh_token_max_age,
     );
 
     let auth_response = AuthResponse {

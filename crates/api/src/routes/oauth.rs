@@ -25,6 +25,7 @@ use rand::RngCore;
 
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_SERVER_NOT_FOUND};
 
 // Token expiration times
 const REFRESH_TOKEN_EXPIRES_DAYS: i64 = 30;
@@ -128,7 +129,7 @@ pub async fn create_client(
 
     // Only Admin and Owner can create OAuth clients
     if matches!(member.role(), WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Generate client_id and client_secret
@@ -226,7 +227,7 @@ pub async fn regenerate_server_oauth_secret(
 
     // Only Admin and Owner can regenerate OAuth secrets
     if matches!(member.role(), WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     let client = OAuthClientRepository::find_by_server_id(&state.db, server_id)
@@ -281,7 +282,7 @@ pub async fn delete_client(
 
     // Only Admin and Owner can delete OAuth clients
     if matches!(member.role(), WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Verify client belongs to workspace
@@ -476,9 +477,14 @@ pub async fn register_client(
         ));
     }
 
-    // Validate redirect URIs (must be HTTPS or localhost)
+    // Load trusted redirect hosts from DB (replaces hardcoded allow-list)
+    let trusted_hosts = mcp_db::OAuthTrustedRedirectHostRepository::list_enabled_hostnames(&state.db)
+        .await
+        .unwrap_or_default();
+
+    // Validate redirect URIs (must be HTTPS or localhost or trusted hostname)
     for uri in &body.redirect_uris {
-        if !is_valid_redirect_uri(uri) {
+        if !is_valid_redirect_uri(uri, &trusted_hosts) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ClientRegistrationErrorResponse {
@@ -565,24 +571,22 @@ pub async fn register_client(
     }))
 }
 
-/// Validate redirect URI (must be HTTPS or localhost)
-fn is_valid_redirect_uri(uri: &str) -> bool {
-    if let Ok(parsed) = Url::parse(uri) {
-        let host = parsed.host_str().unwrap_or("");
-        // Allow localhost (RFC 8252)
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-            return true;
-        }
-        // Allow Claude.ai/Claude.com callbacks
-        // Claude uses both domains depending on region/service
-        if (host == "claude.ai" || host == "claude.com") && parsed.scheme() == "https" {
-            return true;
-        }
-        // All other URIs must be HTTPS
-        parsed.scheme() == "https"
-    } else {
-        false
+/// Validate redirect URI (must be HTTPS, localhost, or a DB-configured trusted hostname).
+fn is_valid_redirect_uri(uri: &str, trusted_hosts: &[String]) -> bool {
+    let Ok(parsed) = Url::parse(uri) else {
+        return false;
+    };
+    let host = parsed.host_str().unwrap_or("");
+    // Allow localhost (RFC 8252)
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        return true;
     }
+    // Allow DB-configured trusted hostnames over HTTPS
+    if parsed.scheme() == "https" && trusted_hosts.iter().any(|h| h == host) {
+        return true;
+    }
+    // All other URIs must be HTTPS
+    parsed.scheme() == "https"
 }
 
 /// Authorization Request Parameters
@@ -1106,13 +1110,17 @@ fn default_expires_in() -> i64 {
 }
 
 /// Resolve OAuth2 credentials for a provider.
-/// - Managed providers: reads env vars `{NAME_UPPER}_CLIENT_ID` / `{NAME_UPPER}_CLIENT_SECRET`.
-/// - Custom provider: reads per-server columns.
+/// - Managed providers: reads `client_id`/`client_secret` from the DB row.
+/// - Custom providers: reads per-server columns.
 pub struct ProviderCredentials {
     pub authorization_url: String,
     pub token_url: String,
     pub client_id: String,
     pub client_secret: String,
+    /// Extra query params to append to the authorization URL (from `extra_auth_params` column).
+    pub extra_auth_params: serde_json::Value,
+    /// Whether a missing refresh token in the callback should be treated as an error.
+    pub requires_refresh_token: bool,
 }
 
 pub async fn resolve_credentials(
@@ -1132,16 +1140,18 @@ pub async fn resolve_credentials(
     }
 
     if record.is_managed {
-        let env_prefix = provider_name.to_uppercase();
-        let client_id = std::env::var(format!("{}_CLIENT_ID", env_prefix))
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}_CLIENT_ID is not configured on this platform", env_prefix)))?;
-        let client_secret = std::env::var(format!("{}_CLIENT_SECRET", env_prefix))
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}_CLIENT_SECRET is not configured on this platform", env_prefix)))?;
+        // Prefer credentials stored in DB; fall back to env vars for backwards compatibility.
+        let client_id = record.client_id.clone()
+            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, format!("client_id is not set for provider '{}'", provider_name)))?;
+        let client_secret = record.client_secret.clone()
+            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, format!("client_secret is not set for provider '{}'", provider_name)))?;
         Ok(ProviderCredentials {
             authorization_url: record.authorization_url,
             token_url: record.token_url,
             client_id,
             client_secret,
+            extra_auth_params: record.extra_auth_params,
+            requires_refresh_token: record.requires_refresh_token,
         })
     } else {
         // Custom provider: credentials must be on the server record
@@ -1153,7 +1163,14 @@ pub async fn resolve_credentials(
             .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: client_id not set".to_string()))?;
         let client_secret = server.upstream_oauth_client_secret.clone()
             .ok_or_else(|| (StatusCode::BAD_REQUEST, "Custom provider: client_secret not set".to_string()))?;
-        Ok(ProviderCredentials { authorization_url, token_url, client_id, client_secret })
+        Ok(ProviderCredentials {
+            authorization_url,
+            token_url,
+            client_id,
+            client_secret,
+            extra_auth_params: serde_json::Value::Object(Default::default()),
+            requires_refresh_token: false,
+        })
     }
 }
 
@@ -1217,7 +1234,7 @@ pub async fn upstream_authorize(
     let server = ServerRepository::find_by_id(&state.db, params.server_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     let _ = WorkspaceRepository::get_member(&state.db, server.workspace_id, auth_user.user_id)
         .await
@@ -1265,13 +1282,20 @@ pub async fn upstream_authorize(
     let callback_encoded: String = url::form_urlencoded::byte_serialize(callback_url.as_bytes()).collect();
     let scopes_encoded: String = url::form_urlencoded::byte_serialize(scopes.as_bytes()).collect();
 
-    // Build authorization URL. For Google we append offline access params for refresh tokens.
+    // Build authorization URL, appending any extra params configured for this provider.
     let mut redirect_url = format!(
         "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
         creds.authorization_url, creds.client_id, callback_encoded, scopes_encoded, nonce
     );
-    if provider_name == "google" {
-        redirect_url.push_str("&access_type=offline&prompt=consent");
+    if let Some(obj) = creds.extra_auth_params.as_object() {
+        for (key, val) in obj {
+            if let Some(v) = val.as_str() {
+                redirect_url.push('&');
+                redirect_url.push_str(&urlencoding::encode(key));
+                redirect_url.push('=');
+                redirect_url.push_str(&urlencoding::encode(v));
+            }
+        }
     }
 
     Ok(Redirect::temporary(&redirect_url).into_response())
@@ -1322,7 +1346,7 @@ pub async fn upstream_callback(
     let server = ServerRepository::find_by_id(&state.db, payload.server_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     let creds = resolve_credentials(&state.db, &payload.provider, &server).await?;
 
@@ -1344,14 +1368,18 @@ pub async fn upstream_callback(
     .await
     .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Token exchange failed: {}", e)))?;
 
-    // Google always returns a refresh_token when prompt=consent&access_type=offline; other
-    // providers may not (e.g. GitHub OAuth Apps issue non-expiring tokens without refresh).
+    // Some providers (e.g. Google with offline access) always return a refresh token.
+    // Treat a missing one as an error when `requires_refresh_token` is set on the provider.
     let refresh_token = match refresh_token_opt {
         Some(rt) => rt,
-        None if payload.provider == "google" => {
+        None if creds.requires_refresh_token => {
             return Err((
                 StatusCode::BAD_GATEWAY,
-                "Google did not return a refresh_token. Ensure prompt=consent and access_type=offline were set.".to_string(),
+                format!(
+                    "Provider '{}' did not return a refresh_token. \
+                     Check the extra_auth_params configured for this provider.",
+                    payload.provider
+                ),
             ));
         }
         None => String::new(), // non-expiring token; store empty string

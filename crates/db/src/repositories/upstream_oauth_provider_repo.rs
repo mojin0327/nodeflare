@@ -9,7 +9,8 @@ impl UpstreamOAuthProviderRepository {
         let rows = sqlx::query_as::<_, UpstreamOAuthProvider>(
             r#"
             SELECT id, name, display_name, authorization_url, token_url, default_scopes,
-                   is_managed, is_enabled, sort_order, created_at, updated_at
+                   is_managed, is_enabled, sort_order, created_at, updated_at,
+                   client_id, client_secret, extra_auth_params, requires_refresh_token
             FROM upstream_oauth_providers
             WHERE is_enabled = TRUE
             ORDER BY sort_order ASC
@@ -24,7 +25,8 @@ impl UpstreamOAuthProviderRepository {
         let row = sqlx::query_as::<_, UpstreamOAuthProvider>(
             r#"
             SELECT id, name, display_name, authorization_url, token_url, default_scopes,
-                   is_managed, is_enabled, sort_order, created_at, updated_at
+                   is_managed, is_enabled, sort_order, created_at, updated_at,
+                   client_id, client_secret, extra_auth_params, requires_refresh_token
             FROM upstream_oauth_providers
             WHERE name = $1
             "#,

@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::error::{db_error, internal_error};
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND};
 
 #[derive(Debug, Deserialize)]
 pub struct ExecRequest {
@@ -45,7 +46,7 @@ pub async fn exec_command(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(
         member.role(),
@@ -61,10 +62,10 @@ pub async fn exec_command(
     let server = ServerRepository::find_by_id(&state.db, server_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
+        return Err((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()));
     }
 
     // Get target region's machine ID

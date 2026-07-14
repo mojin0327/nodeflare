@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::db_error;
 use crate::extractors::AuthUser;
+use crate::routes::helpers::{verify_server_ownership, ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER};
 use crate::state::AppState;
 
 /// Regex for valid secret key names: must start with letter, contain only A-Z, 0-9, _
@@ -36,22 +37,7 @@ pub(crate) fn validate_secret_key(key: &str) -> Result<(), (StatusCode, String)>
     Ok(())
 }
 
-/// Helper to verify server belongs to workspace
-async fn verify_server_ownership(
-    state: &AppState,
-    workspace_id: Uuid,
-    server_id: Uuid,
-) -> Result<(), (StatusCode, String)> {
-    let server = ServerRepository::find_by_id(&state.db, server_id)
-        .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
 
-    if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
-    }
-    Ok(())
-}
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
@@ -61,7 +47,7 @@ pub async fn list(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -94,10 +80,10 @@ pub async fn set(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Verify server belongs to workspace
@@ -142,10 +128,10 @@ pub async fn delete(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Verify server belongs to workspace

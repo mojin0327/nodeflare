@@ -30,12 +30,7 @@ pub struct CachedWorkspaceInfo {
 
 impl CachedWorkspaceInfo {
     pub fn billing_plan(&self) -> Plan {
-        match self.plan.as_str() {
-            "pro" => Plan::Pro,
-            "team" => Plan::Team,
-            "enterprise" => Plan::Enterprise,
-            _ => Plan::Free,
-        }
+        Plan::from_str(&self.plan)
     }
 }
 
@@ -118,34 +113,6 @@ impl ApiCache {
     }
 
     /// Invalidate all workspace caches (useful for bulk operations)
-    /// Scalability: Uses key expiration pattern to avoid expensive SCAN operations
-    /// Note: For true multi-instance invalidation, use Pub/Sub pattern
-    #[allow(dead_code)]
-    pub async fn invalidate_all_workspace_caches(&self) {
-        tracing::warn!("Bulk cache invalidation requested");
-
-        // Scalability Note: Instead of using SCAN which can be expensive,
-        // we rely on TTL-based expiration. For immediate invalidation across
-        // all instances, use the publish_cache_invalidation method with
-        // a broadcast channel that each instance subscribes to.
-        //
-        // Alternative implementation using Lua script for atomic bulk delete:
-        // ```lua
-        // local keys = redis.call('KEYS', 'api:workspace:*:info')
-        // if #keys > 0 then
-        //     return redis.call('DEL', unpack(keys))
-        // end
-        // return 0
-        // ```
-        // Note: KEYS command is not recommended for production with large datasets
-
-        tracing::info!(
-            "Bulk cache invalidation: relying on TTL expiration ({}s). \
-            For immediate invalidation, reduce WORKSPACE_INFO_TTL_SECS or restart instances.",
-            WORKSPACE_INFO_TTL_SECS
-        );
-    }
-
     /// Publish cache invalidation event for multi-instance deployments
     /// Scalability: Other instances subscribe to this channel and invalidate their local caches
     pub async fn publish_cache_invalidation(&self, workspace_id: Uuid) {

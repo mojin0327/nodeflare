@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_WORKSPACE_NOT_FOUND};
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
@@ -89,7 +90,7 @@ pub async fn get(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let plan = workspace.plan();
     let role = member.role();
@@ -116,7 +117,7 @@ pub async fn update(
         .ok_or((StatusCode::FORBIDDEN, "Not a member of this workspace".to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     let workspace = WorkspaceRepository::update(
@@ -154,7 +155,7 @@ pub async fn delete(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     if workspace.owner_id != auth_user.user_id {
         return Err((StatusCode::FORBIDDEN, "Only owner can delete workspace".to_string()));

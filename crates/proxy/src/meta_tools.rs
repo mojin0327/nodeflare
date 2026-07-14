@@ -13,57 +13,68 @@
 //! many tools the server exposes (the Cloudflare "portal" pattern). Search here is
 //! lexical (keyword) — semantic/embedding search can layer on later.
 
-use mcp_db::Tool;
+use mcp_db::{ProxyMetaTool, Tool};
 use serde_json::{json, Value};
 
+/// Stable internal handler identifiers — these never change even if the exposed name does.
 pub const SEARCH_TOOLS: &str = "search_tools";
 pub const CALL_TOOL: &str = "call_tool";
 
 /// Default number of tools returned by a `search_tools` call.
 const SEARCH_LIMIT: usize = 10;
 
-/// The two meta-tool definitions returned in place of the real `tools/list`.
-pub fn definitions() -> Vec<Value> {
-    vec![search_tools_def(), call_tool_def()]
-}
-
-/// The `search_tools` discovery tool definition (shared with code mode).
-pub fn search_tools_def() -> Value {
+/// Build a tool JSON definition from a DB row.
+fn def_from_db(m: &ProxyMetaTool) -> Value {
     json!({
-        "name": SEARCH_TOOLS,
-        "description": "Search this server's available tools by keyword. Returns matching tool names, descriptions, and input schemas. Use this to discover which tool to call, then invoke it with `call_tool`.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Keywords describing the tool or capability you need. Leave empty to list all tools."
-                }
-            },
-            "required": []
-        }
+        "name": m.name,
+        "description": m.description,
+        "inputSchema": m.input_schema,
     })
 }
 
-fn call_tool_def() -> Value {
-    json!({
-        "name": CALL_TOOL,
-        "description": "Invoke one of this server's tools by name. First use `search_tools` to find the tool's name and input schema.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "The exact name of the tool to call (as returned by search_tools)."
-                },
-                "arguments": {
-                    "type": "object",
-                    "description": "Arguments object matching the tool's input schema."
-                }
-            },
-            "required": ["name"]
-        }
-    })
+/// The two meta-tool definitions built from DB rows (search_tools + call_tool).
+pub fn definitions_from_db(db_tools: &[ProxyMetaTool]) -> Vec<Value> {
+    db_tools.iter()
+        .filter(|m| m.handler_type == SEARCH_TOOLS || m.handler_type == CALL_TOOL)
+        .map(def_from_db)
+        .collect()
+}
+
+/// The `search_tools` definition from the DB row (used by code mode too).
+pub fn search_tools_def_from_db(db_tools: &[ProxyMetaTool]) -> Option<Value> {
+    db_tools.iter()
+        .find(|m| m.handler_type == SEARCH_TOOLS)
+        .map(def_from_db)
+}
+
+/// Fallback definitions used when the proxy_meta_tools table is not yet populated.
+pub fn default_definitions() -> Vec<ProxyMetaTool> {
+    vec![
+        ProxyMetaTool {
+            handler_type: SEARCH_TOOLS.to_string(),
+            name: SEARCH_TOOLS.to_string(),
+            description: "Search this server's available tools by keyword. Returns matching tool names, descriptions, and input schemas. Use this to discover which tool to call, then invoke it with `call_tool`.".to_string(),
+            input_schema: json!({"type":"object","properties":{"query":{"type":"string","description":"Keywords describing the tool or capability you need. Leave empty to list all tools."}},"required":[]}),
+            is_enabled: true,
+            sort_order: 0,
+        },
+        ProxyMetaTool {
+            handler_type: CALL_TOOL.to_string(),
+            name: CALL_TOOL.to_string(),
+            description: "Invoke one of this server's tools by name. First use `search_tools` to find the tool's name and input schema.".to_string(),
+            input_schema: json!({"type":"object","properties":{"name":{"type":"string","description":"The exact name of the tool to call (as returned by search_tools)."},"arguments":{"type":"object","description":"Arguments object matching the tool's input schema."}},"required":["name"]}),
+            is_enabled: true,
+            sort_order: 1,
+        },
+        ProxyMetaTool {
+            handler_type: crate::code_mode::RUN_CODE.to_string(),
+            name: crate::code_mode::RUN_CODE.to_string(),
+            description: "Execute JavaScript that orchestrates this server's tools and return only the result.".to_string(),
+            input_schema: json!({"type":"object","properties":{"code":{"type":"string","description":"JavaScript to run."}},"required":["code"]}),
+            is_enabled: true,
+            sort_order: 2,
+        },
+    ]
 }
 
 /// Rank `tools` against a lexical `query` and return up to `limit` matches.
@@ -211,7 +222,8 @@ mod tests {
 
     #[test]
     fn definitions_are_the_two_meta_tools() {
-        let defs = definitions();
+        let defaults = default_definitions();
+        let defs = definitions_from_db(&defaults);
         let names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec![SEARCH_TOOLS, CALL_TOOL]);
     }

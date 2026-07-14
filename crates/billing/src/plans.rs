@@ -28,6 +28,17 @@ impl std::fmt::Display for Plan {
 }
 
 impl Plan {
+    /// Parse a plan string stored in the database into a `Plan`. Unrecognised strings
+    /// default to `Free` so that a new tier can be added without breaking existing rows.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "pro" => Plan::Pro,
+            "team" => Plan::Team,
+            "enterprise" => Plan::Enterprise,
+            _ => Plan::Free,
+        }
+    }
+
     pub fn from_stripe_price_id(price_id: &str) -> Option<Self> {
         // These should match your Stripe price IDs
         // In production, load these from environment or config

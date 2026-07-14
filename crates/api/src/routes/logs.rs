@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::db_error;
 use crate::extractors::AuthUser;
+use crate::routes::helpers::{verify_server_ownership, ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -38,22 +39,7 @@ pub struct PaginatedLogsResponse {
     pub per_page: u32,
 }
 
-/// Helper to verify server belongs to workspace
-async fn verify_server_ownership(
-    state: &AppState,
-    workspace_id: Uuid,
-    server_id: Uuid,
-) -> Result<(), (StatusCode, String)> {
-    let server = ServerRepository::find_by_id(&state.db, server_id)
-        .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
 
-    if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
-    }
-    Ok(())
-}
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
@@ -64,7 +50,7 @@ pub async fn list(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -73,7 +59,7 @@ pub async fn list(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Free plan users can only see logs from last 1 hour
     let is_free_plan = workspace.plan == "free" || workspace.plan.is_empty();
@@ -132,7 +118,7 @@ pub async fn stats(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -165,7 +151,7 @@ pub async fn batch_stats(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let since = Utc::now() - Duration::days(7);
 

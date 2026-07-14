@@ -43,5 +43,11 @@ pub use linked_github::*;
 mod upstream_oauth_provider;
 pub use upstream_oauth_provider::*;
 
+mod oauth_trusted_redirect_host;
+pub use oauth_trusted_redirect_host::*;
+
+mod proxy_meta_tool;
+pub use proxy_meta_tool::*;
+
 mod template;
 pub use template::*;

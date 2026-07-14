@@ -8,7 +8,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use mcp_db::{ServerRepository, WorkspaceRepository};
+use mcp_db::WorkspaceRepository;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{fetch_server_for_workspace, ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND};
 
 /// JSON-RPC request structure
 #[derive(Debug, Serialize)]
@@ -110,17 +111,10 @@ pub async fn health_check(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member of this workspace".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
-    // Get server
-    let server = ServerRepository::find_by_id(&state.db, server_id)
-        .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
-
-    if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
-    }
+    // Get server (also verifies it belongs to this workspace)
+    let server = fetch_server_for_workspace(&state, workspace_id, server_id).await?;
 
     // Check if server has endpoint URL
     let base_endpoint_url = match &server.endpoint_url {
@@ -435,21 +429,14 @@ pub async fn execute_tool(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member of this workspace".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
-    // Get server
-    let server = ServerRepository::find_by_id(&state.db, server_id)
-        .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
-
-    if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
-    }
+    // Get server (also verifies it belongs to this workspace)
+    let server = fetch_server_for_workspace(&state, workspace_id, server_id).await?;
 
     let base_endpoint_url = server
         .endpoint_url

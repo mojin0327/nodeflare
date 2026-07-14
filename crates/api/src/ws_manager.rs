@@ -2,7 +2,7 @@ use mcp_common::types::WsMessage;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock};
 
 /// Default channel capacity for each subscription (configurable via WS_CHANNEL_CAPACITY env var)
@@ -58,8 +58,6 @@ fn channel_ttl_secs() -> u64 {
 #[derive(Debug)]
 struct ChannelInfo {
     sender: broadcast::Sender<WsMessage>,
-    #[allow(dead_code)]
-    created_at: Instant,
     /// Last activity timestamp as milliseconds since UNIX_EPOCH
     /// Using AtomicU64 to allow lock-free updates during broadcast
     last_activity_ms: AtomicU64,
@@ -67,14 +65,12 @@ struct ChannelInfo {
 
 impl ChannelInfo {
     fn new(sender: broadcast::Sender<WsMessage>) -> Self {
-        let now = Instant::now();
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
         Self {
             sender,
-            created_at: now,
             last_activity_ms: AtomicU64::new(now_ms),
         }
     }
@@ -185,12 +181,6 @@ impl WsManager {
         self.total_connections.fetch_sub(1, Ordering::Relaxed);
     }
 
-    /// Get total connection count
-    #[allow(dead_code)]
-    pub fn total_connection_count(&self) -> usize {
-        self.total_connections.load(Ordering::Relaxed)
-    }
-
     /// Broadcast a message to all subscribers of a channel
     /// Scalability: Using read lock + atomic update for better concurrency
     pub async fn broadcast(&self, channel: &str, message: WsMessage) -> Result<usize, BroadcastError> {
@@ -206,45 +196,6 @@ impl WsManager {
             }
         } else {
             Err(BroadcastError::ChannelNotFound)
-        }
-    }
-
-    /// Broadcast a deployment status update
-    #[allow(dead_code)]
-    pub async fn broadcast_deployment_status(
-        &self,
-        deployment_id: uuid::Uuid,
-        message: WsMessage,
-    ) {
-        let channel = format!("deployment:{}", deployment_id);
-        if let Err(e) = self.broadcast(&channel, message).await {
-            tracing::debug!("Failed to broadcast deployment status: {:?}", e);
-        }
-    }
-
-    /// Broadcast a build log line
-    #[allow(dead_code)]
-    pub async fn broadcast_build_log(
-        &self,
-        deployment_id: uuid::Uuid,
-        message: WsMessage,
-    ) {
-        let channel = format!("deployment:{}:logs", deployment_id);
-        if let Err(e) = self.broadcast(&channel, message).await {
-            tracing::debug!("Failed to broadcast build log: {:?}", e);
-        }
-    }
-
-    /// Broadcast a server log line
-    #[allow(dead_code)]
-    pub async fn broadcast_server_log(
-        &self,
-        server_id: uuid::Uuid,
-        message: WsMessage,
-    ) {
-        let channel = format!("server:{}:logs", server_id);
-        if let Err(e) = self.broadcast(&channel, message).await {
-            tracing::debug!("Failed to broadcast server log: {:?}", e);
         }
     }
 
@@ -274,15 +225,6 @@ impl WsManager {
         self.channels.read().await.len()
     }
 
-    /// Get the number of subscribers for a specific channel
-    #[allow(dead_code)]
-    pub async fn subscriber_count(&self, channel: &str) -> usize {
-        let channels_guard = self.channels.read().await;
-        channels_guard
-            .get(channel)
-            .map(|info| info.sender.receiver_count())
-            .unwrap_or(0)
-    }
 }
 
 impl Default for WsManager {

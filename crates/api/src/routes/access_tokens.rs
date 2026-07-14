@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
 
 fn get_api_key_limit(plan: &str) -> i64 {
     match plan {
@@ -31,7 +32,7 @@ pub async fn list(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let keys = ApiKeyRepository::list_by_workspace(&state.db, workspace_id)
         .await
@@ -66,17 +67,17 @@ pub async fn create(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Check API key limit based on plan
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let current_count = ApiKeyRepository::count_by_workspace(&state.db, workspace_id)
         .await
@@ -146,10 +147,10 @@ pub async fn delete(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), mcp_common::types::WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Verify api key belongs to this workspace

@@ -15,6 +15,8 @@ use crate::error::AppError;
 use crate::extractors::{workspace, AuthUser};
 use crate::state::AppState;
 
+const SERVER_LIST_ALL_LIMIT: i64 = 1000;
+
 #[derive(serde::Deserialize)]
 pub struct ServerPath {
     pub workspace_id: Uuid,
@@ -196,7 +198,7 @@ pub async fn list_minimal(
 ) -> Result<Json<Vec<ServerMinimalResponse>>, AppError> {
     workspace::require_member(&state.db, workspace_id, auth_user.user_id).await?;
 
-    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, 1000, 0)
+    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, SERVER_LIST_ALL_LIMIT, 0)
         .await?;
 
     let response: Vec<ServerMinimalResponse> = servers
@@ -220,7 +222,7 @@ pub async fn list_basic(
 ) -> Result<Json<Vec<ServerBasicResponse>>, AppError> {
     workspace::require_member(&state.db, workspace_id, auth_user.user_id).await?;
 
-    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, 1000, 0)
+    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, SERVER_LIST_ALL_LIMIT, 0)
         .await?;
 
     let response: Vec<ServerBasicResponse> = servers
@@ -250,7 +252,7 @@ pub async fn list_summary(
 ) -> Result<Json<Vec<ServerListResponse>>, AppError> {
     workspace::require_member(&state.db, workspace_id, auth_user.user_id).await?;
 
-    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, 1000, 0)
+    let servers = ServerRepository::list_by_workspace(&state.db, workspace_id, SERVER_LIST_ALL_LIMIT, 0)
         .await?;
 
     let response: Vec<ServerListResponse> = servers
@@ -398,12 +400,7 @@ pub async fn create(
         .ok_or_else(|| AppError::not_found("Workspace not found"))?;
 
     // Check plan limits for server count
-    let billing_plan = match workspace.plan.as_str() {
-        "pro" => BillingPlan::Pro,
-        "team" => BillingPlan::Team,
-        "enterprise" => BillingPlan::Enterprise,
-        _ => BillingPlan::Free,
-    };
+    let billing_plan = BillingPlan::from_str(&workspace.plan);
     let limits = billing_plan.limits();
 
     // Reject a memory size the plan can't grant before we do any work.
@@ -917,12 +914,7 @@ pub async fn update(
                 AppError::internal("Failed to fetch workspace")
             })?
             .ok_or_else(|| AppError::not_found("Workspace not found"))?;
-        let billing_plan = match workspace.plan.as_str() {
-            "pro" => BillingPlan::Pro,
-            "team" => BillingPlan::Team,
-            "enterprise" => BillingPlan::Enterprise,
-            _ => BillingPlan::Free,
-        };
+        let billing_plan = BillingPlan::from_str(&workspace.plan);
         check_memory_choice(body.memory_mb, &billing_plan.limits(), &workspace.plan)?;
     }
 
@@ -1068,12 +1060,7 @@ pub async fn deploy(
         .ok_or_else(|| AppError::not_found("Workspace"))?;
 
     // Check deployment limits for this month
-    let billing_plan = match workspace.plan.as_str() {
-        "pro" => BillingPlan::Pro,
-        "team" => BillingPlan::Team,
-        "enterprise" => BillingPlan::Enterprise,
-        _ => BillingPlan::Free,
-    };
+    let billing_plan = BillingPlan::from_str(&workspace.plan);
     let limits = billing_plan.limits();
 
     // Get deployment count for current month (try cache first)

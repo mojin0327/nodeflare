@@ -12,24 +12,11 @@ use uuid::Uuid;
 
 use crate::error::db_error;
 use crate::extractors::AuthUser;
+use crate::routes::helpers::{
+    verify_server_ownership, ERR_DEPLOYMENT_NOT_FOUND, ERR_INSUFFICIENT_PERMISSIONS,
+    ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND, ERR_WORKSPACE_NOT_FOUND,
+};
 use crate::state::AppState;
-
-/// Helper to verify server belongs to workspace
-async fn verify_server_ownership(
-    state: &AppState,
-    workspace_id: Uuid,
-    server_id: Uuid,
-) -> Result<(), (StatusCode, String)> {
-    let server = ServerRepository::find_by_id(&state.db, server_id)
-        .await
-        .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
-
-    if server.workspace_id != workspace_id {
-        return Err((StatusCode::NOT_FOUND, "Server not found".to_string()));
-    }
-    Ok(())
-}
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
@@ -40,7 +27,7 @@ pub async fn list(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -87,7 +74,7 @@ pub async fn get(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -95,11 +82,11 @@ pub async fn get(
     let deployment = DeploymentRepository::find_by_id(&state.db, deployment_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()))?;
 
     // Verify deployment belongs to the specified server (prevents IDOR)
     if deployment.server_id != server_id {
-        return Err((StatusCode::NOT_FOUND, "Deployment not found".to_string()));
+        return Err((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()));
     }
 
     let status = deployment.status();
@@ -133,7 +120,7 @@ pub async fn get_logs(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Verify server belongs to workspace
     verify_server_ownership(&state, workspace_id, server_id).await?;
@@ -141,11 +128,11 @@ pub async fn get_logs(
     let deployment = DeploymentRepository::find_by_id(&state.db, deployment_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()))?;
 
     // Verify deployment belongs to the specified server (prevents IDOR)
     if deployment.server_id != server_id {
-        return Err((StatusCode::NOT_FOUND, "Deployment not found".to_string()));
+        return Err((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()));
     }
 
     Ok(Json(DeploymentLogsResponse {
@@ -163,10 +150,10 @@ pub async fn rollback(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if matches!(member.role(), WorkspaceRole::Viewer) {
-        return Err((StatusCode::FORBIDDEN, "Insufficient permissions".to_string()));
+        return Err((StatusCode::FORBIDDEN, ERR_INSUFFICIENT_PERMISSIONS.to_string()));
     }
 
     // Verify server belongs to workspace
@@ -176,11 +163,11 @@ pub async fn rollback(
     let target_deployment = DeploymentRepository::find_by_id(&state.db, deployment_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()))?;
 
     // Verify deployment belongs to this server
     if target_deployment.server_id != server_id {
-        return Err((StatusCode::NOT_FOUND, "Deployment not found".to_string()));
+        return Err((StatusCode::NOT_FOUND, ERR_DEPLOYMENT_NOT_FOUND.to_string()));
     }
 
     // Only allow rollback to successful deployments
@@ -192,7 +179,7 @@ pub async fn rollback(
     let server = ServerRepository::find_by_id(&state.db, server_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Server not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()))?;
 
     // Create new deployment with same commit SHA
     let deployment = DeploymentRepository::create(
@@ -279,21 +266,16 @@ pub async fn usage(
     let _member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Get workspace to check plan
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Get plan limits
-    let billing_plan = match workspace.plan.as_str() {
-        "pro" => BillingPlan::Pro,
-        "team" => BillingPlan::Team,
-        "enterprise" => BillingPlan::Enterprise,
-        _ => BillingPlan::Free,
-    };
+    let billing_plan = BillingPlan::from_str(&workspace.plan);
     let limits = billing_plan.limits();
 
     // Count deployments this month (try cache first)

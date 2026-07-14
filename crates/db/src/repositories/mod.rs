@@ -48,3 +48,9 @@ pub use upstream_oauth_provider_repo::UpstreamOAuthProviderRepository;
 
 mod template_repo;
 pub use template_repo::ServerTemplateRepository;
+
+mod oauth_trusted_redirect_host_repo;
+pub use oauth_trusted_redirect_host_repo::OAuthTrustedRedirectHostRepository;
+
+mod proxy_meta_tool_repo;
+pub use proxy_meta_tool_repo::ProxyMetaToolRepository;

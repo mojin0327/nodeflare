@@ -13,10 +13,10 @@ use uuid::Uuid;
 
 use crate::error::{db_error, internal_error};
 use crate::extractors::AuthUser;
+use crate::routes::helpers::CSRF_TOKEN_TTL_SECS;
 use crate::state::AppState;
 
 const CSRF_TOKEN_PREFIX: &str = "csrf:oauth:";
-const CSRF_TOKEN_TTL_SECS: i64 = 600; // 10 minutes
 
 // ============================================================================
 // Response Types

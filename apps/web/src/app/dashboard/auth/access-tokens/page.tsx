@@ -20,11 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useSetPageHeader } from '../../page-header';
-
-// Constants
-const MS_PER_MINUTE = 60 * 1000;
-const MS_PER_HOUR = 60 * MS_PER_MINUTE;
-const MS_PER_DAY = 24 * MS_PER_HOUR;
+import { MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from '@/lib/utils';
 
 export default function AccessTokensPage() {
   const t = useTranslations('accessTokens');

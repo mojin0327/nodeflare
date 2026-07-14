@@ -11,31 +11,25 @@
 //! extraction, result shaping); execution is delegated to [`crate::code_runner`].
 
 use crate::meta_tools;
-use mcp_db::Tool;
+use mcp_db::{ProxyMetaTool, Tool};
 use serde_json::{json, Value};
 
 pub const RUN_CODE: &str = "run_code";
 
-/// Tools exposed in code mode: discovery (`search_tools`) + execution (`run_code`).
-pub fn definitions() -> Vec<Value> {
-    vec![meta_tools::search_tools_def(), run_code_def()]
-}
-
-fn run_code_def() -> Value {
-    json!({
-        "name": RUN_CODE,
-        "description": "Execute JavaScript that orchestrates this server's tools and return only the result. A global `tools` object exposes each tool as `await tools.<name>(args)`; use `search_tools` first to discover tool names and their input schemas. Prefer this over many separate tool calls for multi-step tasks: filter and combine data in code so intermediate results don't bloat the context. The sandbox has no file system or network beyond the tools, and `return`-ed value (JSON-serializable) is the result.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "JavaScript to run. Use `await tools.<name>({...})` to call tools and `return` the final value."
-                }
-            },
-            "required": ["code"]
-        }
-    })
+/// Tools exposed in code mode from DB: discovery (`search_tools`) + execution (`run_code`).
+pub fn definitions_from_db(db_tools: &[ProxyMetaTool]) -> Vec<Value> {
+    let mut defs = Vec::new();
+    if let Some(s) = meta_tools::search_tools_def_from_db(db_tools) {
+        defs.push(s);
+    }
+    if let Some(r) = db_tools.iter().find(|m| m.handler_type == RUN_CODE) {
+        defs.push(json!({
+            "name": r.name,
+            "description": r.description,
+            "inputSchema": r.input_schema,
+        }));
+    }
+    defs
 }
 
 /// Extract the `code` argument from a `run_code` tools/call body.
@@ -123,7 +117,8 @@ mod tests {
 
     #[test]
     fn definitions_are_search_and_run_code() {
-        let defs = definitions();
+        let defaults = meta_tools::default_definitions();
+        let defs = definitions_from_db(&defaults);
         let names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
         assert_eq!(names, vec![meta_tools::SEARCH_TOOLS, RUN_CODE]);
     }

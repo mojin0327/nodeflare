@@ -10,6 +10,7 @@ import { FaGithub } from 'react-icons/fa6';
 import { HiOutlineMail } from 'react-icons/hi';
 import { login } from '@/lib/auth-api';
 import { isSafeReturnTo } from '@/lib/safe-redirect';
+import { authUrl } from '@/lib/auth-urls';
 
 const GoogleIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24">
@@ -35,13 +36,8 @@ export default function LoginPage() {
   const [isEmailNotVerified, setIsEmailNotVerified] = useState(false);
   const [loadingType, setLoadingType] = useState<LoadingType>(null);
 
-  const githubLoginUrl = returnTo
-    ? `/api/v1/auth/github?return_to=${encodeURIComponent(returnTo)}`
-    : '/api/v1/auth/github';
-
-  const googleLoginUrl = returnTo
-    ? `/api/v1/auth/google?return_to=${encodeURIComponent(returnTo)}`
-    : '/api/v1/auth/google';
+  const githubLoginUrl = authUrl('github', returnTo);
+  const googleLoginUrl = authUrl('google', returnTo);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();

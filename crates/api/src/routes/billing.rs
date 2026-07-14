@@ -15,6 +15,7 @@ use crate::error::{db_error, internal_error};
 use crate::extractors::AuthUser;
 use crate::middleware::rate_limit::extract_client_ip;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
 
 // Lock timeout for checkout creation (prevents race conditions)
 const CHECKOUT_LOCK_TTL_SECS: i64 = 30;
@@ -71,12 +72,12 @@ pub async fn get_subscription(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let mut cancel_at_period_end = false;
     let mut current_period_start: Option<i64> = None;
@@ -109,12 +110,12 @@ pub async fn get_usage(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let rows = RegionUsageRepository::list_current_period(&state.db, workspace_id)
         .await
@@ -153,12 +154,7 @@ pub async fn get_usage(
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
 
-    let billing_plan = match workspace.plan.as_str() {
-        "pro" => BillingPlan::Pro,
-        "team" => BillingPlan::Team,
-        "enterprise" => BillingPlan::Enterprise,
-        _ => BillingPlan::Free,
-    };
+    let billing_plan = BillingPlan::from_str(&workspace.plan);
     // Free plan is flat (capped, not metered): never show a usage charge.
     let metered = billing_plan != BillingPlan::Free;
     let estimated_cost_jpy = if metered { total_gb_hours * rate } else { 0.0 };
@@ -189,7 +185,7 @@ pub async fn create_checkout(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
         return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
@@ -198,7 +194,7 @@ pub async fn create_checkout(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Prevent duplicate subscriptions - check if already has active subscription
     if workspace.stripe_subscription_id.is_some() {
@@ -291,7 +287,7 @@ pub async fn change_plan(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
         return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
@@ -300,7 +296,7 @@ pub async fn change_plan(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Must have an existing subscription to change plan
     let subscription_id = workspace
@@ -383,7 +379,7 @@ pub async fn cancel_subscription(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
         return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
@@ -392,7 +388,7 @@ pub async fn cancel_subscription(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let subscription_id = workspace
         .stripe_subscription_id
@@ -493,7 +489,7 @@ pub async fn create_portal_session(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
         return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing".to_string()));
@@ -502,7 +498,7 @@ pub async fn create_portal_session(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let customer_id = workspace
         .stripe_customer_id
@@ -684,12 +680,12 @@ pub async fn get_billing_settings(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     Ok(Json(BillingSettingsResponse {
         auto_email_invoices: workspace.auto_email_invoices.unwrap_or(true),
@@ -707,7 +703,7 @@ pub async fn update_billing_settings(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(member.role(), mcp_common::types::WorkspaceRole::Owner | mcp_common::types::WorkspaceRole::Admin) {
         return Err((StatusCode::FORBIDDEN, "Only owners and admins can manage billing settings".to_string()));
@@ -755,12 +751,12 @@ pub async fn get_payment_method(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     let customer_id = match workspace.stripe_customer_id {
         Some(id) => id,
@@ -795,12 +791,12 @@ pub async fn list_invoices(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Return empty list if no stripe customer or billing not configured
     let Some(customer_id) = workspace.stripe_customer_id else {
@@ -858,12 +854,12 @@ pub async fn list_subscription_history(
     WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Return empty list if no stripe customer or billing not configured
     let Some(customer_id) = workspace.stripe_customer_id else {

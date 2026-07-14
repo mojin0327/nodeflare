@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::error::{db_error, internal_error};
 use crate::extractors::AuthUser;
 use crate::state::AppState;
+use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWireGuardRequest {
@@ -50,13 +51,13 @@ pub async fn list_wireguard_peers(
     let _member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     // Get workspace for filtering peers by prefix
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Get Fly.io runtime
     let fly_runtime = state.fly_runtime.as_ref().ok_or((
@@ -97,7 +98,7 @@ pub async fn create_wireguard_peer(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(
         member.role(),
@@ -113,7 +114,7 @@ pub async fn create_wireguard_peer(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
 
     // Get Fly.io runtime
     let fly_runtime = state.fly_runtime.as_ref().ok_or((
@@ -167,7 +168,7 @@ pub async fn delete_wireguard_peer(
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::FORBIDDEN, "Not a member".to_string()))?;
+        .ok_or((StatusCode::FORBIDDEN, ERR_NOT_A_MEMBER.to_string()))?;
 
     if !matches!(
         member.role(),
@@ -186,7 +187,7 @@ pub async fn delete_wireguard_peer(
     let workspace = WorkspaceRepository::find_by_id(&state.db, workspace_id)
         .await
         .map_err(db_error)?
-        .ok_or((StatusCode::NOT_FOUND, "Workspace not found".to_string()))?;
+        .ok_or((StatusCode::NOT_FOUND, ERR_WORKSPACE_NOT_FOUND.to_string()))?;
     if !peer_name.starts_with(&format!("{}-", workspace.slug)) {
         return Err((StatusCode::NOT_FOUND, "Peer not found".to_string()));
     }

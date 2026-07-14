@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { FaGithub } from 'react-icons/fa6';
 import { HiOutlineMail } from 'react-icons/hi';
 import { register } from '@/lib/auth-api';
+import { authUrl } from '@/lib/auth-urls';
 
 const GoogleIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24">
@@ -35,13 +36,8 @@ export default function SignupPage() {
   const [success, setSuccess] = useState(false);
   const [loadingType, setLoadingType] = useState<LoadingType>(null);
 
-  const githubLoginUrl = returnTo
-    ? `/api/v1/auth/github?return_to=${encodeURIComponent(returnTo)}`
-    : '/api/v1/auth/github';
-
-  const googleLoginUrl = returnTo
-    ? `/api/v1/auth/google?return_to=${encodeURIComponent(returnTo)}`
-    : '/api/v1/auth/google';
+  const githubLoginUrl = authUrl('github', returnTo);
+  const googleLoginUrl = authUrl('google', returnTo);
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();

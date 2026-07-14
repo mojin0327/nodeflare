@@ -58,6 +58,9 @@ pub struct ProxyState {
     /// Sandboxed code runner for code mode. `None` disables run_code execution when
     /// PROXY_CODE_RUNNER_URL is unset.
     pub code_runner: Option<code_runner::CodeRunnerClient>,
+    /// Meta-tool definitions loaded from the DB at startup. The name/description are
+    /// configurable per row; handler_type routes to the correct in-proxy logic.
+    pub meta_tools: Vec<mcp_db::ProxyMetaTool>,
 }
 
 #[tokio::main]
@@ -175,6 +178,15 @@ async fn main() -> Result<()> {
     // Optional sandboxed code runner for code mode (None = run_code unavailable).
     let code_runner = code_runner::CodeRunnerClient::from_env(http_client.clone());
 
+    // Load meta-tool definitions from DB (name/description configurable without redeploy).
+    let meta_tools = mcp_db::ProxyMetaToolRepository::list_enabled(&db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("Failed to load proxy meta-tools from DB, using defaults: {}", e);
+            meta_tools::default_definitions()
+        });
+    tracing::info!("Loaded {} proxy meta-tool definitions", meta_tools.len());
+
     let state = Arc::new(ProxyState {
         config: config.clone(),
         db: db_pool,
@@ -187,6 +199,7 @@ async fn main() -> Result<()> {
         max_upstream_response_bytes,
         embedding,
         code_runner,
+        meta_tools,
     });
 
     let app = Router::new()
@@ -976,20 +989,23 @@ async fn forward_request(
     );
 
     // Search/code mode: handle the synthetic meta-tools before scope checks / forwarding.
-    // `target` is cloned so the match doesn't borrow `mcp_info` (we move/return it below).
+    // Route by handler_type so the exposed name can be changed in the DB without code changes.
     let target = mcp_info.target.clone();
     if (fwd.search_mode || fwd.code_mode) && matches!(mcp_info.method, McpMethod::ToolsCall) {
-        match target.as_deref() {
+        let handler = target.as_deref().and_then(|name| {
+            state.meta_tools.iter().find(|m| m.name == name).map(|m| m.handler_type.as_str())
+        });
+        match handler {
             // `search_tools` is served locally from the tool catalog — never forwarded.
             // Available in both search mode and code mode (for discovery).
-            Some(meta_tools::SEARCH_TOOLS) => {
+            Some("search_tools") => {
                 let query = meta_tools::extract_search_query(&body_bytes);
                 let response =
                     search_tools_response(state, credential, fwd, &query, mcp_info.id.as_ref()).await;
                 return Ok((response, mcp_info));
             }
             // `run_code` (code mode): execute in the sandbox; never forwarded.
-            Some(code_mode::RUN_CODE) if fwd.code_mode => {
+            Some("run_code") if fwd.code_mode => {
                 let response =
                     run_code_response(state, fwd, credential, target_url, &body_bytes, mcp_info.id.as_ref())
                         .await;
@@ -997,7 +1013,7 @@ async fn forward_request(
             }
             // `call_tool` (search mode): unwrap into a real tools/call, then flow through
             // the normal path below (scope-checked against the real tool, then forwarded).
-            Some(meta_tools::CALL_TOOL) if fwd.search_mode => {
+            Some("call_tool") if fwd.search_mode => {
                 if let Some(rewritten) = meta_tools::rewrite_call_tool_body(&body_bytes) {
                     body_bytes = Bytes::from(rewritten);
                     mcp_info = extract_mcp_request_info(&body_bytes);
@@ -1051,7 +1067,7 @@ async fn forward_request(
         if status >= 200 && status < 300 {
             spawn_catalog_update(state, fwd.server_id, &response_headers, &response_body);
         }
-        let body = transform_list_body(&mcp_info, &response_headers, response_body, credential, fwd);
+        let body = transform_list_body(&mcp_info, &response_headers, response_body, credential, fwd, &state.meta_tools);
         let response = build_response(status, &response_headers, body)?;
         return Ok((response, mcp_info));
     }
@@ -1072,14 +1088,14 @@ async fn forward_request(
             CoalesceResult::Cached(cached) => {
                 tracing::debug!("Cache hit for {}", target_url);
                 let body = inject_jsonrpc_id(&cached.body, mcp_info.id.as_ref());
-                let body = transform_list_body(&mcp_info, &cached.headers, body, credential, fwd);
+                let body = transform_list_body(&mcp_info, &cached.headers, body, credential, fwd, &state.meta_tools);
                 let response = build_response(cached.status, &cached.headers, body)?;
                 return Ok((response, mcp_info));
             }
             CoalesceResult::Coalesced(cached) => {
                 tracing::debug!("Request coalesced for {}", target_url);
                 let body = inject_jsonrpc_id(&cached.body, mcp_info.id.as_ref());
-                let body = transform_list_body(&mcp_info, &cached.headers, body, credential, fwd);
+                let body = transform_list_body(&mcp_info, &cached.headers, body, credential, fwd, &state.meta_tools);
                 let response = build_response(cached.status, &cached.headers, body)?;
                 return Ok((response, mcp_info));
             }
@@ -1099,7 +1115,7 @@ async fn forward_request(
                             state.request_cache.cancel(handle).await;
                         }
 
-                        let body = transform_list_body(&mcp_info, &response_headers, response_body, credential, fwd);
+                        let body = transform_list_body(&mcp_info, &response_headers, response_body, credential, fwd, &state.meta_tools);
                         let response = build_response(status, &response_headers, body)?;
                         return Ok((response, mcp_info));
                     }
@@ -1142,6 +1158,7 @@ fn transform_list_body(
     body: Vec<u8>,
     credential: Option<&AuthCredential>,
     fwd: &ForwardContext<'_>,
+    db_meta_tools: &[mcp_db::ProxyMetaTool],
 ) -> Vec<u8> {
     if !matches!(mcp_info.method, McpMethod::ToolsList) {
         return body;
@@ -1149,11 +1166,11 @@ fn transform_list_body(
     let content_type = response_content_type(headers);
     // Code mode (takes precedence) exposes run_code + search_tools.
     if fwd.code_mode {
-        return mcp_transform::replace_tools(&body, content_type, &code_mode::definitions());
+        return mcp_transform::replace_tools(&body, content_type, &code_mode::definitions_from_db(db_meta_tools));
     }
     // Search mode replaces the whole tool surface with the two meta-tools.
     if fwd.search_mode {
-        return mcp_transform::replace_tools(&body, content_type, &meta_tools::definitions());
+        return mcp_transform::replace_tools(&body, content_type, &meta_tools::definitions_from_db(db_meta_tools));
     }
     // Filtering only happens when we authenticated the caller (credential present);
     // skip the work entirely when nothing would change.
