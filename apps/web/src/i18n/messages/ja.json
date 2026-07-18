@@ -471,6 +471,8 @@
       "keyPlaceholder": "KEY",
       "valuePlaceholder": "Value",
       "noSecrets": "シークレットが設定されていません",
+      "deleteSecretSuccess": "シークレットを削除しました",
+      "deleteSecretError": "シークレットの削除に失敗しました",
       "serverSettings": "サーバー設定",
       "settingsComingSoon": "設定機能は近日公開予定です。",
       "save": "保存する",

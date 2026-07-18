@@ -54,5 +54,8 @@ chrono.workspace = true
 dotenvy.workspace = true
 bytes.workspace = true
 
+# TLS crypto provider (must match sqlx/fred which both use ring)
+rustls = { version = "0.23", features = ["ring"] }
+
 # LRU cache
 lru = "0.16"

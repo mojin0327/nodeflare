@@ -75,7 +75,7 @@ function DashboardShell({
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [, startTransition] = useTransition();
   const [pendingHref, setPendingHref] = useState<string | null>(null);

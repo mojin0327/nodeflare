@@ -247,7 +247,10 @@ export default function SettingsPage() {
       {/* Language Settings */}
       <section className="mb-8 sm:mb-10">
         <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 sm:mb-4">{t('language.title')}</h2>
-        <LocaleSwitcher />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-white border border-gray-200">
+          <p className="text-gray-600 text-sm sm:text-base">{t('language.description')}</p>
+          <LocaleSwitcher />
+        </div>
       </section>
 
       {/* Sign Out */}

@@ -410,6 +410,7 @@ export default function NewServerPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (formData.name.length > 255 || formData.description.length > 1000) return;
     // Only send env vars that have a key; trim keys so stray whitespace doesn't
     // trip the backend's key validation.
     const env_vars = envVars
@@ -744,8 +745,14 @@ export default function NewServerPage() {
                   setFormData(prev => ({ ...prev, name, slug: generateSlug(name) }));
                 }}
                 required
-                className="mt-2"
+                maxLength={255}
+                className={`mt-2 ${formData.name.length > 255 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
               />
+              {formData.name.length > 200 && (
+                <p className={`text-xs mt-1 ${formData.name.length > 255 ? 'text-red-500' : 'text-gray-400'}`}>
+                  {formData.name.length} / 255
+                </p>
+              )}
             </div>
 
             <div>
@@ -755,8 +762,14 @@ export default function NewServerPage() {
                 placeholder={t('create.descriptionBrief')}
                 value={formData.description}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                className="mt-2"
+                maxLength={1000}
+                className={`mt-2 ${formData.description.length > 1000 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
               />
+              {formData.description.length > 800 && (
+                <p className={`text-xs mt-1 ${formData.description.length > 1000 ? 'text-red-500' : 'text-gray-400'}`}>
+                  {formData.description.length} / 1000
+                </p>
+              )}
             </div>
 
             <div className="space-y-4">

@@ -471,6 +471,8 @@
       "keyPlaceholder": "KEY",
       "valuePlaceholder": "Value",
       "noSecrets": "No secrets configured",
+      "deleteSecretSuccess": "Secret deleted",
+      "deleteSecretError": "Failed to delete secret",
       "serverSettings": "Server Settings",
       "settingsComingSoon": "Settings feature coming soon.",
       "save": "Save",

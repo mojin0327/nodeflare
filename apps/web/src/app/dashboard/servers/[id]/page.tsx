@@ -1320,6 +1320,9 @@ function SecretsTab({
       setNewKey('');
       setNewValue('');
     },
+    onError: (error: any) => {
+      toast.error(error?.message || tCommon('error'));
+    },
   });
 
   const deleteMutation = useMutation({
@@ -1327,6 +1330,10 @@ function SecretsTab({
       api.delete(`/workspaces/${workspaceId}/servers/${serverId}/secrets/${secretKey}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'secrets'] });
+      toast.success(t('detail.deleteSecretSuccess'));
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || t('detail.deleteSecretError'));
     },
   });
 
@@ -1443,7 +1450,7 @@ function SettingsTab({
   const [toolFilterByScope, setToolFilterByScope] = useState(server.tool_list_filter_by_scope ?? true);
   const [toolSchemaSlim, setToolSchemaSlim] = useState(server.tool_schema_slim ?? false);
   const [toolSearchMode, setToolSearchMode] = useState(server.tool_search_mode ?? false);
-  const [toolCodeMode, setToolCodeMode] = useState(server.tool_code_mode ?? false);
+  const [toolCodeMode, setToolCodeMode] = useState(server.tool_code_mode ?? true);
   const [upstreamOauthEnabled, setUpstreamOauthEnabled] = useState<boolean>(!!server.upstream_oauth_provider);
   const [upstreamOauthProvider, setUpstreamOauthProvider] = useState<string>(server.upstream_oauth_provider ?? '');
   const [upstreamOauthScopes, setUpstreamOauthScopes] = useState<string>((server.upstream_oauth_scopes ?? []).join(' '));

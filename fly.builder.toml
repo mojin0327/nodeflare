@@ -1,0 +1,13 @@
+app = "nodeflare-builder"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "docker/Dockerfile.builder"
+
+[env]
+  RUST_LOG = "info"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 2048

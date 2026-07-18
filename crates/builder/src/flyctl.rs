@@ -1664,30 +1664,53 @@ FROM app AS runtime
 # machine reports unhealthy). The adapter is referenced by absolute path below, so it
 # needs no fixed WORKDIR of its own.
 
+# Switch to root so package manager installs (apt/apk) succeed even when the
+# base image's final USER is a non-root account (e.g. mcpuser). We restore the
+# original user before CMD so the server process still runs unprivileged.
+USER root
+
 # Ensure Node.js is available for the adapter. No-op if the base already has it;
 # otherwise install via the base image's own package manager (apt or apk).
 RUN sh -c 'command -v node >/dev/null 2>&1 || \
     (command -v apt-get >/dev/null 2>&1 && apt-get update && apt-get install -y --no-install-recommends nodejs npm ca-certificates && rm -rf /var/lib/apt/lists/*) || \
     (command -v apk >/dev/null 2>&1 && apk add --no-cache nodejs npm ca-certificates) || true'
 
+# Copy STDIO adapter from the build context (runs as root so any WORKDIR is writable)
+COPY stdio-adapter.cjs /app/stdio-adapter.cjs
+RUN chmod 644 /app/stdio-adapter.cjs
+
 # Preserve ENV variables from original Dockerfile (especially PATH)
 {env_lines}
-
-# Copy STDIO adapter from the build context
-COPY stdio-adapter.cjs /app/stdio-adapter.cjs
 
 ENV PORT={port}
 ENV MCP_PATH="{mcp_path}"
 ENV MCP_HTTP_HOST=0.0.0.0
 EXPOSE {port}
 
+# Restore the non-root user from the app stage before launching the server
+# (extract the last USER instruction from the original Dockerfile, falling
+# back to root if none was set).
+{restore_user}
+
 # Run the original entry command through the STDIO adapter
 CMD ["node", "/app/stdio-adapter.cjs", {entry_cmd_json}]
 "#,
         app_stage = app_stage,
         env_lines = env_lines,
+        restore_user = extract_last_user(original_dockerfile),
         entry_cmd_json = format_entry_command_as_args(entry_command)
     )
+}
+
+/// Extract the last USER instruction from a Dockerfile to restore it after root operations.
+/// Returns e.g. "USER mcpuser" or empty string if no USER instruction was found.
+fn extract_last_user(dockerfile: &str) -> String {
+    dockerfile
+        .lines()
+        .filter(|l| l.trim().to_uppercase().starts_with("USER "))
+        .last()
+        .map(|l| l.trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Extract ENV lines from a Dockerfile
