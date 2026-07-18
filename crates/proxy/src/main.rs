@@ -210,8 +210,12 @@ async fn main() -> Result<()> {
         .route("/health", any(health_check))
         // OAuth 2.1 metadata endpoint (RFC 8414)
         .route("/.well-known/oauth-authorization-server", get(oauth_metadata))
+        // RFC 9728 allows the discovery URL to include the resource path as a suffix,
+        // e.g. /.well-known/oauth-protected-resource/mcp for resource https://host/mcp.
+        .route("/.well-known/oauth-authorization-server/*path", get(oauth_metadata))
         // OAuth 2.0 Protected Resource Metadata (RFC 9728)
         .route("/.well-known/oauth-protected-resource", get(protected_resource_metadata))
+        .route("/.well-known/oauth-protected-resource/*path", get(protected_resource_metadata))
         // Internal: sandboxed code (code mode) calls tools back through here. This is the
         // security boundary — it re-checks scope from the exec token, not the sandbox.
         .route("/internal/code-exec/:server_id/tools-call", post(code_exec_tools_call))
@@ -960,7 +964,9 @@ async fn forward_request(
 ) -> Result<(Response, McpRequestInfo), ProxyError> {
     let method = request.method().clone();
     let inbound_headers = request.headers().clone();
-    let is_sse = is_sse_request(&inbound_headers);
+    // GET requests to the MCP endpoint always return an SSE stream from the adapter,
+    // regardless of whether the client sends Accept: text/event-stream.
+    let is_sse = method == axum::http::Method::GET || is_sse_request(&inbound_headers);
 
     // Sanitize headers once (hop-by-hop strip, Authorization policy, X-Forwarded-*).
     let mut headers = build_upstream_headers(&inbound_headers, fwd);
