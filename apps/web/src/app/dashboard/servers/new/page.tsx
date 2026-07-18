@@ -763,11 +763,11 @@ export default function NewServerPage() {
                 value={formData.description}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 maxLength={1000}
-                className={`mt-2 ${formData.description.length > 1000 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                className={`mt-2 ${(formData.description?.length ?? 0) > 1000 ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
               />
-              {formData.description.length > 800 && (
-                <p className={`text-xs mt-1 ${formData.description.length > 1000 ? 'text-red-500' : 'text-gray-400'}`}>
-                  {formData.description.length} / 1000
+              {(formData.description?.length ?? 0) > 800 && (
+                <p className={`text-xs mt-1 ${(formData.description?.length ?? 0) > 1000 ? 'text-red-500' : 'text-gray-400'}`}>
+                  {formData.description?.length ?? 0} / 1000
                 </p>
               )}
             </div>
