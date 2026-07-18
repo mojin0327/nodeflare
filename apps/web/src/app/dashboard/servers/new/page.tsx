@@ -410,7 +410,7 @@ export default function NewServerPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.name.length > 255 || formData.description.length > 1000) return;
+    if (formData.name.length > 255 || (formData.description?.length ?? 0) > 1000) return;
     // Only send env vars that have a key; trim keys so stray whitespace doesn't
     // trip the backend's key validation.
     const env_vars = envVars
