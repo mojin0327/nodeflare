@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useServerStatusWebSocket, useDeploymentWebSocket } from '@/hooks/use-websocket';
-import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2 } from 'lucide-react';
+import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2, Pencil } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -1310,13 +1310,19 @@ function SecretsTab({
 }) {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editKey, setEditKey] = useState('');
+  const [editValue, setEditValue] = useState('');
   const queryClient = useQueryClient();
+
+  const invalidateSecrets = () =>
+    queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'secrets'] });
 
   const createMutation = useMutation({
     mutationFn: () =>
       api.post(`/workspaces/${workspaceId}/servers/${serverId}/secrets`, { key: newKey, value: newValue }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'secrets'] });
+      invalidateSecrets();
       setNewKey('');
       setNewValue('');
     },
@@ -1325,17 +1331,42 @@ function SecretsTab({
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) =>
+      api.post(`/workspaces/${workspaceId}/servers/${serverId}/secrets`, { key, value }),
+    onSuccess: () => {
+      invalidateSecrets();
+      setEditingKey(null);
+      toast.success(t('detail.updateSecretSuccess'));
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || t('detail.updateSecretError'));
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (secretKey: string) =>
       api.delete(`/workspaces/${workspaceId}/servers/${serverId}/secrets/${secretKey}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'secrets'] });
+      invalidateSecrets();
       toast.success(t('detail.deleteSecretSuccess'));
     },
     onError: (error: any) => {
       toast.error(error?.message || t('detail.deleteSecretError'));
     },
   });
+
+  const startEdit = (key: string) => {
+    setEditingKey(key);
+    setEditKey(key);
+    setEditValue('');
+  };
+
+  const cancelEdit = () => {
+    setEditingKey(null);
+    setEditKey('');
+    setEditValue('');
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1355,30 +1386,99 @@ function SecretsTab({
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
               {t('detail.valuePlaceholder')}
             </th>
-            <th className="px-4 py-3 w-12"></th>
+            <th className="px-4 py-3 w-20"></th>
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {secrets.map((secret) => (
-            <tr key={secret.key} className="group hover:bg-gray-50 transition-colors">
-              <td className="px-4 py-3 border-r border-gray-200">
-                <code className="text-sm font-mono text-gray-900">{secret.key}</code>
-              </td>
-              <td className="px-4 py-3 border-r border-gray-200">
-                <span className="text-sm text-gray-400 font-mono">••••••••••••</span>
-              </td>
-              <td className="px-4 py-3">
-                <button
-                  onClick={() => deleteMutation.mutate(secret.key)}
-                  disabled={deleteMutation.isPending}
-                  className="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
-                  title={tCommon('delete')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </td>
-            </tr>
-          ))}
+          {secrets.map((secret) => {
+            const isEditing = editingKey === secret.key;
+            return (
+              <tr key={secret.key} className="group hover:bg-gray-50 transition-colors">
+                {isEditing ? (
+                  <>
+                    <td className="px-4 py-2 border-r border-gray-200">
+                      <input
+                        type="text"
+                        value={editKey}
+                        onChange={(e) => setEditKey(e.target.value.toUpperCase())}
+                        className="w-full px-2 py-1.5 text-sm font-mono bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      />
+                    </td>
+                    <td className="px-4 py-2 border-r border-gray-200">
+                      <input
+                        autoFocus
+                        type="password"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        placeholder={t('detail.valuePlaceholder')}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && editKey && editValue) {
+                            updateMutation.mutate({ key: editKey, value: editValue });
+                          } else if (e.key === 'Escape') {
+                            cancelEdit();
+                          }
+                        }}
+                        className="w-full px-2 py-1.5 text-sm font-mono bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => updateMutation.mutate({ key: editKey, value: editValue })}
+                          disabled={!editKey || !editValue || updateMutation.isPending}
+                          className="p-1.5 text-violet-500 hover:text-violet-700 transition-colors disabled:text-gray-300 disabled:cursor-not-allowed"
+                          title={tCommon('save')}
+                        >
+                          {updateMutation.isPending ? (
+                            <div className="w-4 h-4 border-2 rounded-full border-violet-200 border-t-violet-600 animate-spin" />
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={updateMutation.isPending}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
+                          title={tCommon('cancel')}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-4 py-3 border-r border-gray-200">
+                      <code className="text-sm font-mono text-gray-900">{secret.key}</code>
+                    </td>
+                    <td className="px-4 py-3 border-r border-gray-200">
+                      <span className="text-sm text-gray-400 font-mono">••••••••••••</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => startEdit(secret.key)}
+                          disabled={deleteMutation.isPending || !!editingKey}
+                          className="p-1.5 text-gray-400 hover:text-violet-600 transition-colors disabled:text-gray-200 disabled:cursor-not-allowed"
+                          title={tCommon('edit')}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteMutation.mutate(secret.key)}
+                          disabled={deleteMutation.isPending || !!editingKey}
+                          className="p-1.5 text-gray-400 hover:text-red-600 transition-colors disabled:text-gray-200 disabled:cursor-not-allowed"
+                          title={tCommon('delete')}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </>
+                )}
+              </tr>
+            );
+          })}
           {/* Inline Add Row */}
           <tr className="bg-gray-50/50">
             <td className="px-4 py-2 border-r border-gray-200">
@@ -1897,9 +1997,14 @@ function SettingsTab({
       </div>
 
       <div className="pt-4 border-t border-gray-200">
-        <Button onClick={handleSave} disabled={isSaving} className="bg-violet-600 hover:bg-violet-700 px-6">
+        <button
+          onClick={handleSave}
+          disabled={isSaving}
+          className="px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+        >
+          {isSaving && <div className="w-4 h-4 border-2 rounded-full border-violet-300 border-t-white animate-spin" />}
           {isSaving ? tCommon('loading') : t('detail.save')}
-        </Button>
+        </button>
       </div>
 
     </div>

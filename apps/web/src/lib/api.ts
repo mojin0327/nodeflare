@@ -113,13 +113,20 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      throw new ApiError(
-        errorBody.error?.message || errorBody.message || 'An error occurred',
-        response.status,
-        errorBody.error?.code || errorBody.code,
-        errorBody.error?.details
-      );
+      const contentType = response.headers.get('content-type') ?? '';
+      let message = 'An error occurred';
+      let code: string | undefined;
+      let details: Record<string, unknown> | undefined;
+      if (contentType.includes('application/json')) {
+        const errorBody = await response.json().catch(() => ({}));
+        message = errorBody.error?.message || errorBody.message || message;
+        code = errorBody.error?.code || errorBody.code;
+        details = errorBody.error?.details;
+      } else {
+        const text = await response.text().catch(() => '');
+        if (text) message = text;
+      }
+      throw new ApiError(message, response.status, code, details);
     }
 
     // Handle 204 No Content

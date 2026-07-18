@@ -122,9 +122,6 @@ pub async fn delete(
     auth_user: AuthUser,
     Path((workspace_id, server_id, key)): Path<(Uuid, Uuid, String)>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Validate secret key name (security: prevent injection attacks)
-    validate_secret_key(&key)?;
-
     let member = WorkspaceRepository::get_member(&state.db, workspace_id, auth_user.user_id)
         .await
         .map_err(db_error)?

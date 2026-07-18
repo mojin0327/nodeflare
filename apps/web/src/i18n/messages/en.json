@@ -473,6 +473,8 @@
       "noSecrets": "No secrets configured",
       "deleteSecretSuccess": "Secret deleted",
       "deleteSecretError": "Failed to delete secret",
+      "updateSecretSuccess": "Secret updated",
+      "updateSecretError": "Failed to update secret",
       "serverSettings": "Server Settings",
       "settingsComingSoon": "Settings feature coming soon.",
       "save": "Save",
