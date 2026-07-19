@@ -1,4 +1,5 @@
 import { ImageResponse } from 'next/og';
+import sharp from 'sharp';
 
 export const alt = 'MCP Server Template';
 export const size = { width: 1200, height: 630 };
@@ -61,26 +62,50 @@ function makeMT(seed: number) {
 
 const JAZZ_COLORS = ['#01888C', '#FC7500', '#034F5D', '#F73F01', '#FC1960', '#C7144C', '#F3C100', '#1598F2', '#2465E1', '#F19E02'];
 
-// Render Jazzicon as a plain SVG string → base64 data URL so Satori treats it
-// as a pre-rendered image. Trying to let Satori lay out SVG elements or
-// clip absolutely-positioned divs has never produced correct output.
-function jazziconDataUrl(seed: number, d: number): string {
-  const rand = makeMT(seed);
-  const colors = JAZZ_COLORS.slice();
-  const shift = Math.floor(rand() * colors.length);
-  for (let i = 0; i < shift; i++) colors.push(colors.shift()!);
-  const bg = colors.shift()!;
-  const w = d * 1.92;
-  const rects = Array.from({ length: 3 }, () => {
-    const tx = d / 2 + (rand() - 0.5) * d;
-    const ty = d / 2 + (rand() - 0.5) * d;
-    const rot = (rand() * 360).toFixed(1);
-    const color = colors.shift()!;
-    colors.push(color);
-    return `<rect x="${-w / 2}" y="${-w / 2}" width="${w}" height="${w}" fill="${color}" transform="translate(${tx},${ty}) rotate(${rot})"/>`;
-  }).join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}" viewBox="0 0 ${d} ${d}"><rect width="${d}" height="${d}" fill="${bg}"/>${rects}</svg>`;
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+// Pre-compute rotated rectangle as polygon points — avoids SVG transform support
+// dependency in librsvg (the sharp SVG renderer), which silently dropped transforms.
+function rotatedRectPoints(cx: number, cy: number, hw: number, angleDeg: number): string {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return ([ [-hw, -hw], [hw, -hw], [hw, hw], [-hw, hw] ] as [number, number][])
+    .map(([x, y]) => `${(cx + x * cos - y * sin).toFixed(2)},${(cy + x * sin + y * cos).toFixed(2)}`)
+    .join(' ');
+}
+
+// Render Jazzicon as PNG via sharp (SVG→PNG). Satori only reliably renders
+// PNG/JPEG in <img>; SVG data URLs are not decoded by Satori's image pipeline.
+// Algorithm matches danfinlay/jazzicon: 3 shapes with circular velocity placement.
+async function jazziconPngDataUrl(seed: number, d: number): Promise<string | null> {
+  try {
+    const rand = makeMT(seed);
+    const colors = JAZZ_COLORS.slice();
+    const shift = Math.floor(rand() * colors.length);
+    for (let i = 0; i < shift; i++) colors.push(colors.shift()!);
+    const bg = colors.shift()!;
+    const center = d / 2;
+    const total = 3;
+    const shapes = [0, 1, 2].map(i => {
+      const firstRot = rand();
+      const angle = Math.PI * 2 * firstRot;
+      const velocity = (d / total) * rand() + (i * d / total);
+      const tx = Math.cos(angle) * velocity + center;
+      const ty = Math.sin(angle) * velocity + center;
+      const rot = firstRot * 360 + rand() * 180;
+      return `<polygon points="${rotatedRectPoints(tx, ty, center, rot)}" fill="${colors[i % colors.length]}"/>`;
+    }).join('');
+    // SVG mask (white=visible) for rounded corners — more reliably supported by
+    // librsvg than clipPath with rx/ry on the clipping rect.
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}" viewBox="0 0 ${d} ${d}">` +
+      `<defs><mask id="m"><rect width="${d}" height="${d}" rx="32" ry="32" fill="white"/></mask></defs>` +
+      `<g mask="url(#m)"><rect width="${d}" height="${d}" fill="${bg}"/>${shapes}</g>` +
+      `</svg>`;
+    const png = await sharp(Buffer.from(svg)).png().toBuffer();
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    return null;
+  }
 }
 
 // Inline SVG paths with explicit fill — satori doesn't resolve currentColor on SVG attributes
@@ -161,7 +186,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   // Pre-fetch everything in parallel — images as data URLs so Satori renders without
   // making any external network requests itself (external fetches inside Satori are
   // unreliable and can throw, causing a 500).
-  const [tmpl, font500, font800, imgSign, imgC1, imgC2, imgLogo] = await Promise.all([
+  const [tmpl, font500, font800, imgSign, imgC1, imgC2, imgLogo, jazzPng] = await Promise.all([
     fetch(`${apiBase}/templates/${id}`, { next: { revalidate: 3600 } })
       .then(r => r.ok ? r.json() : null)
       .catch(() => null),
@@ -171,6 +196,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     fetchAsDataUrl(`${SITE_URL}/c1.png`),
     fetchAsDataUrl(`${SITE_URL}/c2.png`),
     fetchAsDataUrl(`${SITE_URL}/logo2.png`),
+    jazziconPngDataUrl(fnv1a(id), 140),
   ]);
 
   const name       = tmpl?.name        ?? 'MCP Server Template';
@@ -182,7 +208,6 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
   const shortDesc = desc.length > 200 ? desc.slice(0, 200) + '…' : desc;
   const fs        = titleSize(name);
-  const jazzUrl   = jazziconDataUrl(fnv1a(id), 140);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -259,10 +284,12 @@ export default async function Image({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* Right: server icon — pre-rendered as SVG data URL so Satori handles it as a plain image */}
+          {/* Right: server icon — PNG pre-rendered by sharp (rounded corners baked in) */}
           <div style={{ width: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={jazzUrl} width={140} height={140} alt="" style={{ borderRadius: 32 }} />
+            {jazzPng && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={jazzPng} width={140} height={140} alt="" />
+            )}
           </div>
         </div>
       </div>
