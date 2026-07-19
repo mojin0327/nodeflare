@@ -40,7 +40,7 @@ const NODEFLARE_SERVER_TOKEN = process.env.NODEFLARE_SERVER_TOKEN || '';
 // Shorter while waiting (token absent), longer once the server is running.
 const POLL_INTERVAL_WAITING_MS = 30_000;  // 30 s  – fast recovery after user authorises
 const POLL_INTERVAL_RUNNING_MS  = 60_000; // 60 s  – periodic rotation detection
-const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TIMEOUT_MS = 300000;
 const KEEPALIVE_MS = 25000;
 
 // Maximum accepted request body. Without a cap a single client could stream an

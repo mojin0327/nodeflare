@@ -1700,6 +1700,31 @@
       "desc": "Create a free account to deploy \"{name}\" and start using it in seconds.",
       "signup": "Sign up",
       "login": "Sign in"
+    },
+    "detail": {
+      "back": "Back to Explore",
+      "notFound": "Template not found",
+      "notFoundDesc": "This template may have been removed or made private.",
+      "noDescription": "No description provided.",
+      "technicalDetails": "Technical Details",
+      "runtime": "Runtime",
+      "transport": "Transport",
+      "branch": "Branch",
+      "mcpPath": "MCP Path",
+      "entryCommand": "Entry Command",
+      "buildCommand": "Build Command",
+      "rootDirectory": "Root Directory",
+      "auth": "Authentication",
+      "memory": "Memory",
+      "port": "Port",
+      "oauthProvider": "OAuth Provider",
+      "oauthScopes": "OAuth Scopes",
+      "authEnabled": "NodeFlare Auth",
+      "authDisabled": "Disabled (server handles own auth)",
+      "memoryDefault": "Auto",
+      "portDefault": "Runtime default",
+      "deployCount": "{count} deploys",
+      "publishedOn": "Published"
     }
   }
 }

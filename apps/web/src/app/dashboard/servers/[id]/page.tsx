@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useServerStatusWebSocket, useDeploymentWebSocket } from '@/hooks/use-websocket';
-import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2, Pencil } from 'lucide-react';
+import { AlertCircle, Server, Boxes, Github, Trash2, AlertTriangle, ExternalLink, Copy, ChevronRight, Check, Send, Plus, Key, Lock, Play, Rocket, Globe, Webhook, Settings, Eye, EyeOff, RefreshCw, Clipboard, X, Wrench, CheckCircle, Link2, BarChart3, HelpCircle, Share2, Pencil, Save } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -539,11 +539,12 @@ export default function ServerDetailPage() {
               </div>
               <div>
                 <Label className="text-xs font-medium text-gray-700">{t('detail.shareTemplateDesc')}</Label>
-                <Input
+                <textarea
                   value={shareTemplateDesc}
                   onChange={(e) => setShareTemplateDesc(e.target.value)}
-                  className="mt-1 text-sm"
-                  placeholder="Optional"
+                  className="mt-1 w-full text-sm border border-input rounded-md px-3 py-2 bg-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                  placeholder="Optional — shown on the template detail page"
+                  rows={5}
                 />
               </div>
               <div>
@@ -2004,7 +2005,9 @@ function SettingsTab({
         >
           {isSaving ? (
             <div className="w-3.5 h-3.5 border-2 rounded-full border-white/30 border-t-white animate-spin" />
-          ) : null}
+          ) : (
+            <Save className="w-3.5 h-3.5" />
+          )}
           {t('detail.save')}
         </button>
       </div>

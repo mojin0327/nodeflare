@@ -1038,15 +1038,13 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                     let message = match server_logs {
                         Some(logs) => format!(
                             "Deployment reached Fly.io but the MCP server did not start. \
-                            This is usually a wrong startup command, missing build output, \
-                            or the server running out of memory.\n\n\
+                            This is usually a wrong startup command or missing build output.\n\n\
                             Server error:\n{}",
                             logs
                         ),
                         None => format!(
                             "Deployment reached Fly.io but the MCP server did not start \
-                            ({}). This is usually a wrong startup command, missing build output, \
-                            or the server running out of memory.",
+                            ({}). This is usually a wrong startup command or missing build output.",
                             detail
                         ),
                     };

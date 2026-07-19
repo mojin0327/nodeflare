@@ -203,7 +203,10 @@ function TemplateCard({
   isAuthed: boolean;
 }) {
   return (
-    <div className="flex flex-col rounded-2xl border border-gray-200 hover:border-gray-300 hover:shadow-lg transition-all duration-200 bg-white p-6 gap-3">
+    <div className="relative flex flex-col rounded-2xl border border-gray-200 hover:border-violet-300 hover:shadow-lg transition-all duration-200 bg-white p-6 gap-3">
+      {/* Card-level link overlay */}
+      <Link href={`/explore/${tmpl.id}`} className="absolute inset-0 rounded-2xl" aria-label={tmpl.name} />
+
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-semibold text-gray-900 text-base leading-snug">{tmpl.name}</h3>
         <span className="flex items-center gap-1.5 text-gray-500 text-xs font-medium shrink-0">
@@ -220,7 +223,7 @@ function TemplateCard({
         href={`https://github.com/${tmpl.github_repo}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 transition-colors w-fit"
+        className="relative z-10 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-700 transition-colors w-fit"
       >
         <Github className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate max-w-[220px]">{tmpl.github_repo}</span>
@@ -240,7 +243,7 @@ function TemplateCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between mt-auto pt-2">
+      <div className="relative z-10 flex items-center justify-between mt-auto pt-2">
         <span className="text-xs text-gray-400">{tmpl.use_count.toLocaleString()} deploys</span>
         {isAuthed ? (
           <Link href={`/dashboard/servers/new?template=${tmpl.id}`}>

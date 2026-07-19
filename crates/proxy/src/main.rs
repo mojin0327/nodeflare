@@ -1240,13 +1240,19 @@ async fn run_code_response(
             id,
         ));
     };
-    // Code mode relies on NodeFlare-authenticated scopes for the tool-call endpoint.
-    let Some(cred) = credential else {
-        tracing::warn!("run_code: rejected — unauthenticated (code mode requires NodeFlare auth)");
-        return respond(code_mode::error_json(
-            "Code execution requires NodeFlare authentication.",
-            id,
-        ));
+    // Code mode relies on scopes to limit what the sandbox can call back through the
+    // internal tool-call endpoint. For auth-disabled servers every tool is public, so
+    // grant wildcard scope instead of blocking execution entirely.
+    let scopes = match credential {
+        Some(cred) => cred.scopes(),
+        None if !fwd.auth_enabled => vec!["*".to_string()],
+        None => {
+            tracing::warn!("run_code: rejected — unauthenticated (code mode requires NodeFlare auth)");
+            return respond(code_mode::error_json(
+                "Code execution requires NodeFlare authentication.",
+                id,
+            ));
+        }
     };
     let Some(code) = code_mode::extract_code(body) else {
         tracing::warn!("run_code: rejected — missing 'code' argument");
@@ -1258,7 +1264,7 @@ async fn run_code_response(
     let ctx = CodeExecContext {
         server_id: fwd.server_id,
         target_url: target_url.to_string(),
-        scopes: cred.scopes(),
+        scopes,
     };
     // TTL covers the execution wall-clock plus a small buffer.
     let ttl = runner.timeout_secs() as i64 + 10;

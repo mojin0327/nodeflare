@@ -1698,6 +1698,31 @@
       "desc": "「{name}」をデプロイするには、無料アカウントを作成してください。",
       "signup": "サインアップ",
       "login": "ログイン"
+    },
+    "detail": {
+      "back": "一覧に戻る",
+      "notFound": "テンプレートが見つかりません",
+      "notFoundDesc": "このテンプレートは削除されたか、非公開になっている可能性があります。",
+      "noDescription": "説明はありません。",
+      "technicalDetails": "技術情報",
+      "runtime": "ランタイム",
+      "transport": "トランスポート",
+      "branch": "ブランチ",
+      "mcpPath": "MCPパス",
+      "entryCommand": "起動コマンド",
+      "buildCommand": "ビルドコマンド",
+      "rootDirectory": "ルートディレクトリ",
+      "auth": "認証",
+      "memory": "メモリ",
+      "port": "ポート",
+      "oauthProvider": "OAuthプロバイダー",
+      "oauthScopes": "OAuthスコープ",
+      "authEnabled": "NodeFlare認証",
+      "authDisabled": "無効（サーバー側で認証処理）",
+      "memoryDefault": "自動",
+      "portDefault": "ランタイム既定",
+      "deployCount": "{count} 回デプロイ",
+      "publishedOn": "公開日"
     }
   }
 }

@@ -226,12 +226,14 @@ pub async fn build_image_from_tarball(
     let tar_bytes = build_context.into_inner()?;
     let has_dockerfile = check_has_dockerfile(&tar_bytes);
 
-    let final_tar = if has_dockerfile {
+    let tar_with_dockerfile = if has_dockerfile {
         tar_bytes
     } else {
-        // Add generated Dockerfile
         add_dockerfile_to_tar(&tar_bytes, &job.runtime)?
     };
+
+    // Auto-upgrade Node.js version if package-lock.json requires it
+    let final_tar = maybe_upgrade_node_in_tar(&tar_with_dockerfile)?;
 
     // Build the image
     let options = BuildImageOptions {
@@ -301,11 +303,14 @@ pub async fn build_image(docker: &Docker, job: &BuildJob, image_tag: &str) -> Re
 
     // Check for Dockerfile, add if missing
     let has_dockerfile = repo_path.join("Dockerfile").exists();
-    let final_tar = if has_dockerfile {
+    let tar_with_dockerfile = if has_dockerfile {
         tar_bytes
     } else {
         add_dockerfile_to_tar(&tar_bytes, &job.runtime)?
     };
+
+    // Auto-upgrade Node.js version if package-lock.json requires it
+    let final_tar = maybe_upgrade_node_in_tar(&tar_with_dockerfile)?;
 
     let options = BuildImageOptions {
         t: image_tag,
@@ -333,6 +338,153 @@ pub async fn build_image(docker: &Docker, job: &BuildJob, image_tag: &str) -> Re
     }
 
     Ok(())
+}
+
+/// Parse a Node.js engines.node specifier and return the minimum required major version.
+/// Handles OR branches by taking the minimum (compatible with any branch).
+fn min_node_major_from_spec(spec: &str) -> Option<u32> {
+    spec.split("||")
+        .filter_map(|branch| {
+            let b = branch.trim();
+            // Match >=X, >X, ^X, ~X, or a bare number at the start
+            let re = Regex::new(r"(?:>=|>|\^|~)\s*(\d+)|^(\d+)").ok()?;
+            re.captures(b).and_then(|c| {
+                c.get(1).or(c.get(2))
+                    .and_then(|m| m.as_str().parse::<u32>().ok())
+            })
+        })
+        .min()
+}
+
+/// Scan package-lock.json (lockfileVersion 2/3) for the highest minimum required Node.js version.
+/// Returns (major_version, "package@version") or None if no engines.node constraints found.
+fn max_node_requirement_from_lockfile(lockfile_json: &str) -> Option<(u32, String)> {
+    let lockfile: serde_json::Value = serde_json::from_str(lockfile_json).ok()?;
+    let packages = lockfile.get("packages")?.as_object()?;
+
+    let mut max_major: u32 = 0;
+    let mut culprit = String::new();
+
+    for (pkg_path, pkg_info) in packages {
+        if pkg_path.is_empty() {
+            continue; // root package entry — skip
+        }
+        let Some(node_spec) = pkg_info
+            .get("engines")
+            .and_then(|e| e.get("node"))
+            .and_then(|n| n.as_str())
+        else {
+            continue;
+        };
+
+        if let Some(major) = min_node_major_from_spec(node_spec) {
+            if major > max_major {
+                max_major = major;
+                // pkg_path looks like "node_modules/undici" or nested "node_modules/a/node_modules/b"
+                let name = pkg_path
+                    .rsplit("node_modules/")
+                    .next()
+                    .unwrap_or(pkg_path)
+                    .trim_matches('/');
+                let version = pkg_info.get("version").and_then(|v| v.as_str()).unwrap_or("");
+                culprit = if version.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}@{}", name, version)
+                };
+            }
+        }
+    }
+
+    if max_major > 0 { Some((max_major, culprit)) } else { None }
+}
+
+/// Extract the Node.js major version from a Dockerfile's FROM line (first `FROM node:X` match).
+fn node_major_in_dockerfile(dockerfile: &str) -> Option<u32> {
+    let re = Regex::new(r"(?im)^\s*FROM\s+node:(\d+)").ok()?;
+    re.captures(dockerfile)?.get(1)?.as_str().parse().ok()
+}
+
+/// Replace all `node:X` / `node:X.Y.Z` occurrences in a Dockerfile with `node:{target_major}`.
+/// Preserves the image variant suffix (e.g. `-alpine`, `-slim`).
+fn set_node_version_in_dockerfile(dockerfile: &str, target_major: u32) -> String {
+    let re = Regex::new(r"\bnode:(\d+)(?:\.\d+)*").unwrap();
+    re.replace_all(dockerfile, |_: &regex::Captures| format!("node:{}", target_major))
+        .into_owned()
+}
+
+/// Read the tarball's Dockerfile and package-lock.json. If the lockfile's transitive
+/// engines.node requires a newer Node.js major than the Dockerfile specifies, rewrite
+/// the Dockerfile and return an updated tarball. Returns the original bytes unchanged
+/// if no upgrade is needed or the tarball has no Node.js project.
+fn maybe_upgrade_node_in_tar(tar_bytes: &[u8]) -> Result<Vec<u8>> {
+    // Pass 1: extract Dockerfile and package-lock.json from the tarball.
+    let mut dockerfile: Option<String> = None;
+    let mut lockfile: Option<String> = None;
+
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().to_string();
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf)?;
+        match path.as_str() {
+            "Dockerfile" if dockerfile.is_none() => {
+                dockerfile = Some(String::from_utf8_lossy(&buf).into_owned());
+            }
+            "package-lock.json" if lockfile.is_none() => {
+                lockfile = Some(String::from_utf8_lossy(&buf).into_owned());
+            }
+            _ => {}
+        }
+    }
+
+    let (dockerfile_str, lockfile_str) = match (dockerfile, lockfile) {
+        (Some(d), Some(l)) => (d, l),
+        _ => return Ok(tar_bytes.to_vec()),
+    };
+
+    let current = match node_major_in_dockerfile(&dockerfile_str) {
+        Some(v) => v,
+        None => return Ok(tar_bytes.to_vec()), // Not a node image — nothing to do.
+    };
+
+    let (required, culprit) = match max_node_requirement_from_lockfile(&lockfile_str) {
+        Some(v) => v,
+        None => return Ok(tar_bytes.to_vec()),
+    };
+
+    if required <= current {
+        return Ok(tar_bytes.to_vec());
+    }
+
+    tracing::warn!(
+        "Auto-upgrading Dockerfile Node.js {} → {} (required by {})",
+        current, required, culprit
+    );
+
+    let upgraded = set_node_version_in_dockerfile(&dockerfile_str, required);
+
+    // Pass 2: rebuild the tarball, substituting the upgraded Dockerfile.
+    let mut new_tar = tar::Builder::new(Vec::new());
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let mut header = entry.header().clone();
+        let path = header.path()?.to_string_lossy().to_string();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data)?;
+
+        if path == "Dockerfile" {
+            header.set_size(upgraded.len() as u64);
+            header.set_cksum();
+            new_tar.append(&header, upgraded.as_bytes())?;
+        } else {
+            new_tar.append(&header, &data[..])?;
+        }
+    }
+
+    Ok(new_tar.into_inner()?)
 }
 
 fn check_has_dockerfile(tar_bytes: &[u8]) -> bool {
