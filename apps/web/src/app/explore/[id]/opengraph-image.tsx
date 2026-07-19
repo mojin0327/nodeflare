@@ -1,7 +1,8 @@
 import { ImageResponse } from 'next/og';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker } from 'react-icons/si';
+import Jazzicon from 'react-jazzicon';
 
-// Node.js runtime (not edge) — needed for react-icons and proper font loading
+// Node.js runtime — needed for react-icons, react-jazzicon, and font loading
 export const alt = 'MCP Server Template';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -25,18 +26,14 @@ function titleSize(name: string) {
   return 46;
 }
 
-// FNV-1a hash → deterministic gradient (same algorithm as JazzAvatar in dashboard)
-function idToGradient(id: string) {
+// FNV-1a hash — same algorithm as jazz-avatar.tsx
+function numFromSeed(seed: string): number {
   let h = 2166136261;
-  for (let i = 0; i < id.length; i++) {
-    h = (Math.imul(h ^ id.charCodeAt(i), 16777619)) >>> 0;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-  const hue1 = h % 360;
-  const hue2 = (hue1 + 50 + (h >> 8) % 70) % 360;
-  return {
-    bg1: `hsl(${hue1}, 72%, 58%)`,
-    bg2: `hsl(${hue2}, 76%, 42%)`,
-  };
+  return h >>> 0;
 }
 
 function RuntimeIcon({ runtime }: { runtime: string }) {
@@ -52,15 +49,15 @@ function RuntimeIcon({ runtime }: { runtime: string }) {
   }
 }
 
+// Load Inter from jsDelivr (direct woff2 URL — more reliable than parsing Google Fonts CSS)
 async function loadInterFont(weight: number): Promise<ArrayBuffer | null> {
   try {
-    const css = await fetch(
-      `https://fonts.googleapis.com/css2?family=Inter:wght@${weight}&display=swap`,
-      { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' }, next: { revalidate: 86400 } }
-    ).then(r => r.text());
-    const url = css.match(/src: url\((.+?)\) format\('woff2'\)/)?.[1];
-    if (!url) return null;
-    return fetch(url, { next: { revalidate: 86400 } }).then(r => r.arrayBuffer());
+    const res = await fetch(
+      `https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.0/files/inter-latin-${weight}-normal.woff2`,
+      { next: { revalidate: 86400 } }
+    );
+    if (!res.ok) return null;
+    return res.arrayBuffer();
   } catch {
     return null;
   }
@@ -91,7 +88,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
   const shortDesc = desc.length > 90 ? desc.slice(0, 90) + '…' : desc;
   const fs        = titleSize(name);
-  const gradient  = idToGradient(id);
+  const jazzSeed  = numFromSeed(id);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -165,14 +162,8 @@ export default async function Image({ params }: { params: Promise<{ id: string }
               // eslint-disable-next-line @next/next/no-img-element
               <img src={iconUrl} alt="" style={{ width: 140, height: 140, borderRadius: 32, objectFit: 'cover' }} />
             ) : (
-              <div style={{
-                width: 140, height: 140, borderRadius: 32,
-                background: `linear-gradient(135deg, ${gradient.bg1}, ${gradient.bg2})`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <span style={{ color: 'rgba(255,255,255,0.92)', fontSize: 64, fontWeight: 800, letterSpacing: '-0.05em' }}>
-                  {name[0].toUpperCase()}
-                </span>
+              <div style={{ borderRadius: 32, overflow: 'hidden', width: 140, height: 140, display: 'flex' }}>
+                <Jazzicon diameter={140} seed={jazzSeed} />
               </div>
             )}
           </div>
