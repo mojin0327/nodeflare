@@ -34,7 +34,9 @@ use crate::ProxyState;
 /// How long a `session-id -> machine-id` binding lives in Redis (refreshed on use).
 const SESSION_TTL_SECS: i64 = 3600;
 /// How long the per-app Machine list is cached in Redis.
-const MACHINE_LIST_TTL_SECS: i64 = 30;
+/// Short TTL so the proxy quickly detects when a cold machine becomes ready and
+/// can prefer it over forcing another stopped machine on subsequent initializes.
+const MACHINE_LIST_TTL_SECS: i64 = 5;
 
 /// Per-app round-robin cursors for picking a Machine on `initialize`. A single
 /// global cursor doesn't round-robin per app (interleaved apps skew each other),

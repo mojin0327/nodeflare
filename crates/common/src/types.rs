@@ -921,6 +921,7 @@ pub struct ServerTemplateResponse {
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Vec<String>,
     pub required_env_var_keys: Vec<String>,
+    pub icon_url: Option<String>,
     pub use_count: i32,
     pub created_at: DateTime<Utc>,
 }
@@ -948,6 +949,7 @@ pub struct ServerTemplatePrivateResponse {
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Vec<String>,
     pub required_env_var_keys: Vec<String>,
+    pub icon_url: Option<String>,
     pub use_count: i32,
     pub created_at: DateTime<Utc>,
 }
@@ -962,6 +964,8 @@ pub struct PublishTemplateRequest {
     /// Keys of existing secrets that deployers must supply (values are never stored)
     #[validate(length(max = 50))]
     pub required_env_var_keys: Vec<String>,
+    #[validate(url, length(max = 2048))]
+    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

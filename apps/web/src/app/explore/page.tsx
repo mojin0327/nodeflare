@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { ServerTemplatePublic } from '@/types';
 import { Header } from '@/components/layout';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker } from 'react-icons/si';
-import { Github, Key, Rocket, Search, X } from 'lucide-react';
+import { Github, Rocket, Search, X } from 'lucide-react';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -228,20 +228,6 @@ function TemplateCard({
         <Github className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate max-w-[220px]">{tmpl.github_repo}</span>
       </a>
-
-      {tmpl.required_env_var_keys.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {tmpl.required_env_var_keys.map((k) => (
-            <span
-              key={k}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-xs font-mono text-amber-700"
-            >
-              <Key className="w-2.5 h-2.5" />
-              {k}
-            </span>
-          ))}
-        </div>
-      )}
 
       <div className="relative z-10 flex items-center justify-between mt-auto pt-2">
         <span className="text-xs text-gray-400">{tmpl.use_count.toLocaleString()} deploys</span>

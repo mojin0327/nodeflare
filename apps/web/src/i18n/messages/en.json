@@ -507,6 +507,7 @@
       "shareDialogDesc": "This will list your server in the public Explore page so anyone can deploy it with one click. Environment variable values are never shared — only the key names you select below.",
       "shareTemplateName": "Template name",
       "shareTemplateDesc": "Description",
+      "shareTemplateIcon": "Icon URL (optional)",
       "shareEnvVarKeys": "Required env var keys (values are not shared)",
       "shareEnvVarKeysHint": "Select which secrets deployers must fill in",
       "sharePublish": "Publish",

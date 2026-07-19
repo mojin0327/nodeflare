@@ -888,39 +888,39 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
         })
         .collect();
 
-    // Generate or rotate the per-server identity token used to authenticate
-    // the MCP server against NodeFlare's internal API (e.g. OAuth token storage).
-    let server_token = uuid::Uuid::new_v4().to_string();
-    match ctx.crypto.encrypt_string(&server_token) {
-        Ok((encrypted_value, nonce)) => {
-            if let Err(e) = SecretRepository::upsert(&ctx.db, CreateSecret {
-                server_id: job.server_id,
-                key: "_NODEFLARE_SERVER_TOKEN".to_string(),
-                encrypted_value,
-                nonce,
-            }).await {
-                tracing::warn!("Failed to persist NODEFLARE_SERVER_TOKEN for server {}: {}", job.server_id, e);
+    // If the server requires upstream OAuth, tell the adapter which provider to use,
+    // and generate a per-server identity token so the MCP server can authenticate
+    // against NodeFlare's internal API to fetch OAuth tokens.
+    if job.upstream_oauth_provider.is_some() {
+        let server_token = uuid::Uuid::new_v4().to_string();
+        match ctx.crypto.encrypt_string(&server_token) {
+            Ok((encrypted_value, nonce)) => {
+                if let Err(e) = SecretRepository::upsert(&ctx.db, CreateSecret {
+                    server_id: job.server_id,
+                    key: "_NODEFLARE_SERVER_TOKEN".to_string(),
+                    encrypted_value,
+                    nonce,
+                }).await {
+                    tracing::warn!("Failed to persist NODEFLARE_SERVER_TOKEN for server {}: {}", job.server_id, e);
+                }
             }
+            Err(e) => tracing::warn!("Failed to encrypt NODEFLARE_SERVER_TOKEN: {}", e),
         }
-        Err(e) => tracing::warn!("Failed to encrypt NODEFLARE_SERVER_TOKEN: {}", e),
+        secrets.push(mcp_queue::SecretEnv {
+            key: "NODEFLARE_SERVER_TOKEN".to_string(),
+            value: server_token,
+        });
+        let api_internal_url = std::env::var("NODEFLARE_API_INTERNAL_URL")
+            .unwrap_or_else(|_| "http://nodeflare-api.internal:8080".to_string());
+        secrets.push(mcp_queue::SecretEnv {
+            key: "NODEFLARE_API_INTERNAL_URL".to_string(),
+            value: api_internal_url,
+        });
+        secrets.push(mcp_queue::SecretEnv {
+            key: "SERVER_ID".to_string(),
+            value: job.server_id.to_string(),
+        });
     }
-    secrets.push(mcp_queue::SecretEnv {
-        key: "NODEFLARE_SERVER_TOKEN".to_string(),
-        value: server_token,
-    });
-    // Expose NodeFlare's internal API URL so the MCP server can reach it over Fly 6PN.
-    let api_internal_url = std::env::var("NODEFLARE_API_INTERNAL_URL")
-        .unwrap_or_else(|_| "http://nodeflare-api.internal:8080".to_string());
-    secrets.push(mcp_queue::SecretEnv {
-        key: "NODEFLARE_API_INTERNAL_URL".to_string(),
-        value: api_internal_url,
-    });
-    // Expose the server's own UUID so the stdio-adapter can poll for upstream tokens.
-    secrets.push(mcp_queue::SecretEnv {
-        key: "SERVER_ID".to_string(),
-        value: job.server_id.to_string(),
-    });
-    // If the server requires upstream OAuth, tell the adapter which provider to use.
     if let Some(ref provider) = job.upstream_oauth_provider {
         secrets.push(mcp_queue::SecretEnv {
             key: "OAUTH_PROVIDER".to_string(),

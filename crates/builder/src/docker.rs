@@ -342,7 +342,7 @@ pub async fn build_image(docker: &Docker, job: &BuildJob, image_tag: &str) -> Re
 
 /// Parse a Node.js engines.node specifier and return the minimum required major version.
 /// Handles OR branches by taking the minimum (compatible with any branch).
-fn min_node_major_from_spec(spec: &str) -> Option<u32> {
+pub(crate) fn min_node_major_from_spec(spec: &str) -> Option<u32> {
     spec.split("||")
         .filter_map(|branch| {
             let b = branch.trim();
@@ -358,7 +358,7 @@ fn min_node_major_from_spec(spec: &str) -> Option<u32> {
 
 /// Scan package-lock.json (lockfileVersion 2/3) for the highest minimum required Node.js version.
 /// Returns (major_version, "package@version") or None if no engines.node constraints found.
-fn max_node_requirement_from_lockfile(lockfile_json: &str) -> Option<(u32, String)> {
+pub(crate) fn max_node_requirement_from_lockfile(lockfile_json: &str) -> Option<(u32, String)> {
     let lockfile: serde_json::Value = serde_json::from_str(lockfile_json).ok()?;
     let packages = lockfile.get("packages")?.as_object()?;
 
@@ -400,14 +400,14 @@ fn max_node_requirement_from_lockfile(lockfile_json: &str) -> Option<(u32, Strin
 }
 
 /// Extract the Node.js major version from a Dockerfile's FROM line (first `FROM node:X` match).
-fn node_major_in_dockerfile(dockerfile: &str) -> Option<u32> {
+pub(crate) fn node_major_in_dockerfile(dockerfile: &str) -> Option<u32> {
     let re = Regex::new(r"(?im)^\s*FROM\s+node:(\d+)").ok()?;
     re.captures(dockerfile)?.get(1)?.as_str().parse().ok()
 }
 
 /// Replace all `node:X` / `node:X.Y.Z` occurrences in a Dockerfile with `node:{target_major}`.
 /// Preserves the image variant suffix (e.g. `-alpine`, `-slim`).
-fn set_node_version_in_dockerfile(dockerfile: &str, target_major: u32) -> String {
+pub(crate) fn set_node_version_in_dockerfile(dockerfile: &str, target_major: u32) -> String {
     let re = Regex::new(r"\bnode:(\d+)(?:\.\d+)*").unwrap();
     re.replace_all(dockerfile, |_: &regex::Captures| format!("node:{}", target_major))
         .into_owned()

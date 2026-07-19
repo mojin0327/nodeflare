@@ -471,7 +471,14 @@ async fn proxy_handler(
 
         Some(credential)
     } else {
-        // Auth disabled: Skip credential validation
+        // Auth disabled: Skip credential validation.
+        // Reject OAuth DCR requests (/register) — they make no sense without auth and
+        // confuse MCP clients into thinking OAuth is required when it isn't.
+        let path = uri.path();
+        if path == "/register" || path.ends_with("/register") {
+            tracing::info!("proxy_handler: auth disabled, rejecting /register for server {}", server.id);
+            return Ok(StatusCode::NOT_FOUND.into_response());
+        }
         tracing::info!("proxy_handler: auth disabled for server {}, skipping credential validation", server.id);
         None
     };

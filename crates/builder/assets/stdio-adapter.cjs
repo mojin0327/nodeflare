@@ -398,12 +398,12 @@ function startMcpProcess() {
     }, delay);
   });
 
-  // Auto-initialize after a short delay to let the process start
-  setTimeout(() => {
-    initializePromise = autoInitialize().catch((err) => {
-      console.error('[Adapter] Failed to auto-initialize:', err);
-    });
-  }, 500);
+  // Auto-initialize as soon as the process is spawned. The MCP process reads
+  // from stdin immediately, so no delay is needed. Starting sooner reduces the
+  // cold-start latency seen by the first connecting client.
+  initializePromise = autoInitialize().catch((err) => {
+    console.error('[Adapter] Failed to auto-initialize:', err);
+  });
 }
 
 // ---------------------------------------------------------------------------

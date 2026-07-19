@@ -176,6 +176,7 @@ export interface ServerTemplatePublic {
   upstream_oauth_provider: string | null;
   upstream_oauth_scopes: string[];
   required_env_var_keys: string[];
+  icon_url: string | null;
   use_count: number;
   created_at: string;
 }
@@ -202,6 +203,7 @@ export interface ServerTemplate {
   upstream_oauth_provider: string | null;
   upstream_oauth_scopes: string[];
   required_env_var_keys: string[];
+  icon_url: string | null;
   use_count: number;
   created_at: string;
 }
@@ -210,6 +212,7 @@ export interface PublishTemplateRequest {
   name?: string;
   description?: string;
   required_env_var_keys: string[];
+  icon_url?: string;
 }
 
 export interface RequestLog {

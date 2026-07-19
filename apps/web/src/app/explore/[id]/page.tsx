@@ -62,6 +62,34 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+function DeployButton({ tmpl, t, onAuthRequired, isAuthed }: {
+  tmpl: ServerTemplatePublic;
+  t: ReturnType<typeof useTranslations>;
+  onAuthRequired: () => void;
+  isAuthed: boolean;
+}) {
+  if (isAuthed) {
+    return (
+      <Link href={`/dashboard/servers/new?template=${tmpl.id}`} className="shrink-0">
+        <Button size="sm" className="bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
+          <Rocket className="w-3.5 h-3.5 mr-1.5" />
+          {t('deploy')}
+        </Button>
+      </Link>
+    );
+  }
+  return (
+    <Button
+      size="sm"
+      onClick={onAuthRequired}
+      className="shrink-0 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white"
+    >
+      <Rocket className="w-3.5 h-3.5 mr-1.5" />
+      {t('deploy')}
+    </Button>
+  );
+}
+
 export default function TemplateDetailPage() {
   const t = useTranslations('explore');
   const { user } = useAuth();
@@ -85,9 +113,9 @@ export default function TemplateDetailPage() {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <Link
           href="/explore"
-          className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors mb-6"
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg px-2 py-1 -ml-2 transition-colors mb-6"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           {t('detail.back')}
         </Link>
 
@@ -117,11 +145,20 @@ export default function TemplateDetailPage() {
         )}
 
         {tmpl && (
-          <div className="space-y-6">
+          <div>
             {/* Header */}
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 pb-6">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 flex-wrap">
+                  {tmpl.icon_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={tmpl.icon_url}
+                      alt=""
+                      className="w-10 h-10 rounded-xl object-cover shrink-0 border border-gray-200"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  )}
                   <h1 className="text-2xl font-bold text-gray-900">{tmpl.name}</h1>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
                     <RuntimeIcon runtime={tmpl.runtime} size="sm" />
@@ -134,28 +171,12 @@ export default function TemplateDetailPage() {
                   <span>{t('detail.publishedOn')} {new Date(tmpl.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
-
-              {user ? (
-                <Link href={`/dashboard/servers/new?template=${tmpl.id}`} className="shrink-0">
-                  <Button className="bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
-                    <Rocket className="w-4 h-4 mr-2" />
-                    {t('deploy')}
-                  </Button>
-                </Link>
-              ) : (
-                <Button
-                  onClick={() => setShowAuthModal(true)}
-                  className="shrink-0 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white"
-                >
-                  <Rocket className="w-4 h-4 mr-2" />
-                  {t('deploy')}
-                </Button>
-              )}
+              <DeployButton tmpl={tmpl} t={t} onAuthRequired={() => setShowAuthModal(true)} isAuthed={!!user} />
             </div>
 
             {/* Description */}
-            <div className="rounded-2xl border border-gray-200 p-6">
-              <h2 className="text-sm font-semibold text-gray-700 mb-3">Description</h2>
+            <div className="py-6 border-t border-gray-100">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Description</h2>
               {tmpl.description ? (
                 <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{tmpl.description}</p>
               ) : (
@@ -163,9 +184,9 @@ export default function TemplateDetailPage() {
               )}
             </div>
 
-            {/* GitHub */}
-            <div className="rounded-2xl border border-gray-200 p-6">
-              <h2 className="text-sm font-semibold text-gray-700 mb-3">Repository</h2>
+            {/* Repository */}
+            <div className="py-6 border-t border-gray-100">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Repository</h2>
               <a
                 href={`https://github.com/${tmpl.github_repo}`}
                 target="_blank"
@@ -180,28 +201,25 @@ export default function TemplateDetailPage() {
 
             {/* Required env vars */}
             {tmpl.required_env_var_keys.length > 0 && (
-              <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-6">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">{t('requiredEnvVars')}</h2>
+              <div className="py-6 border-t border-gray-100">
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">{t('requiredEnvVars')}</h2>
                 <div className="flex flex-wrap gap-2">
                   {tmpl.required_env_var_keys.map((k) => (
                     <span
                       key={k}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-amber-200 text-xs font-mono text-amber-700"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-gray-50 border border-gray-200 text-xs font-mono text-gray-700"
                     >
-                      <Key className="w-3 h-3" />
+                      <Key className="w-3 h-3 text-gray-400" />
                       {k}
                     </span>
                   ))}
                 </div>
-                <p className="text-xs text-amber-600 mt-3">
-                  You will be prompted to set these environment variables when deploying.
-                </p>
               </div>
             )}
 
             {/* Technical details */}
-            <div className="rounded-2xl border border-gray-200 p-6">
-              <h2 className="text-sm font-semibold text-gray-700 mb-1">{t('detail.technicalDetails')}</h2>
+            <div className="py-6 border-t border-gray-100">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('detail.technicalDetails')}</h2>
               <div className="mt-2">
                 <DetailRow label={t('detail.transport')} value={TRANSPORT_LABELS[tmpl.transport] ?? tmpl.transport} />
                 <DetailRow label={t('detail.mcpPath')} value={tmpl.mcp_path} />
@@ -241,30 +259,12 @@ export default function TemplateDetailPage() {
               </div>
             </div>
 
-            {/* Deploy CTA (bottom) */}
-            <div className="rounded-2xl border border-violet-100 bg-violet-50/50 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Deploy this MCP server</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {tmpl.use_count.toLocaleString()} {t('results')} have already deployed this
-                </p>
-              </div>
-              {user ? (
-                <Link href={`/dashboard/servers/new?template=${tmpl.id}`} className="shrink-0">
-                  <Button className="bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
-                    <Rocket className="w-4 h-4 mr-2" />
-                    {t('deploy')}
-                  </Button>
-                </Link>
-              ) : (
-                <Button
-                  onClick={() => setShowAuthModal(true)}
-                  className="shrink-0 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white"
-                >
-                  <Rocket className="w-4 h-4 mr-2" />
-                  {t('deploy')}
-                </Button>
-              )}
+            {/* Deploy CTA */}
+            <div className="py-6 border-t border-gray-100 flex items-center justify-between gap-4">
+              <p className="text-sm text-gray-500">
+                {tmpl.use_count.toLocaleString()} deploys
+              </p>
+              <DeployButton tmpl={tmpl} t={t} onAuthRequired={() => setShowAuthModal(true)} isAuthed={!!user} />
             </div>
           </div>
         )}

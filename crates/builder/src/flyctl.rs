@@ -2018,6 +2018,35 @@ pub async fn build_and_deploy(
         None => None,
     };
 
+    // If the repo ships a package-lock.json, check whether transitive deps require
+    // a newer Node.js than the Dockerfile declares, and upgrade the FROM line.
+    let existing_dockerfile = if let Some(ref df) = existing_dockerfile {
+        let lockfile_path = source_dir.join("package-lock.json");
+        if let Ok(lockfile_str) = tokio::fs::read_to_string(&lockfile_path).await {
+            if let Some((required, culprit)) = crate::docker::max_node_requirement_from_lockfile(&lockfile_str) {
+                if let Some(current) = crate::docker::node_major_in_dockerfile(df) {
+                    if required > current {
+                        on_log(&format!(
+                            "Auto-upgrading Node.js {} → {} (required by {})",
+                            current, required, culprit
+                        ));
+                        Some(crate::docker::set_node_version_in_dockerfile(df, required))
+                    } else {
+                        existing_dockerfile
+                    }
+                } else {
+                    existing_dockerfile
+                }
+            } else {
+                existing_dockerfile
+            }
+        } else {
+            existing_dockerfile
+        }
+    } else {
+        None
+    };
+
     // For STDIO transport with existing Dockerfile, extract the entry command
     let existing_entry_command = if job.transport == "stdio" {
         if let Some(ref content) = existing_dockerfile {

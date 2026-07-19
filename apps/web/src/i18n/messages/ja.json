@@ -507,6 +507,7 @@
       "shareDialogDesc": "公開Exploreページにサーバーを掲載し、誰でもワンクリックでデプロイできるようになります。環境変数の値は共有されません — 以下で選択したキー名のみ表示されます。",
       "shareTemplateName": "テンプレート名",
       "shareTemplateDesc": "説明",
+      "shareTemplateIcon": "アイコン URL（任意）",
       "shareEnvVarKeys": "必要な環境変数キー（値は共有しません）",
       "shareEnvVarKeysHint": "デプロイする人が入力すべきシークレットを選択",
       "sharePublish": "投稿する",
