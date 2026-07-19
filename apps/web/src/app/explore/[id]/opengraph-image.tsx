@@ -1,8 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker } from 'react-icons/si';
-import Jazzicon from 'react-jazzicon';
 
-// Node.js runtime — needed for react-icons, react-jazzicon, and font loading
 export const alt = 'MCP Server Template';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -26,14 +24,60 @@ function titleSize(name: string) {
   return 46;
 }
 
-// FNV-1a hash — same algorithm as jazz-avatar.tsx
-function numFromSeed(seed: string): number {
+// FNV-1a hash — same as jazz-avatar.tsx
+function fnv1a(s: string): number {
   let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
+}
+
+// Mersenne Twister — same algorithm react-jazzicon uses internally
+function makeMT(seed: number) {
+  const N = 624, M = 397;
+  const mt = new Array<number>(N);
+  mt[0] = seed >>> 0;
+  for (let i = 1; i < N; i++) {
+    mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
+  }
+  let idx = N;
+  return (): number => {
+    if (idx >= N) {
+      for (let k = 0; k < N; k++) {
+        const y = (mt[k] & 0x80000000) | (mt[(k + 1) % N] & 0x7fffffff);
+        mt[k] = mt[(k + M) % N] ^ (y >>> 1) ^ (y & 1 ? 0x9908b0df : 0);
+      }
+      idx = 0;
+    }
+    let y = mt[idx++];
+    y ^= y >>> 11;
+    y ^= (y << 7) & 0x9d2c5680;
+    y ^= (y << 15) & 0xefc60000;
+    y ^= y >>> 18;
+    return (y >>> 0) / 0x100000000;
+  };
+}
+
+// Jazzicon color palette (same as react-jazzicon)
+const JAZZ_COLORS = ['#01888C', '#FC7500', '#034F5D', '#F73F01', '#FC1960', '#C7144C', '#F3C100', '#1598F2', '#2465E1', '#F19E02'];
+
+function jazziconShapes(seed: number, d: number) {
+  const rand = makeMT(seed);
+  // hueShift: rotate palette by random amount (jazzicon's colorRotate)
+  const colors = JAZZ_COLORS.slice();
+  const shift = Math.floor(rand() * colors.length);
+  for (let i = 0; i < shift; i++) colors.push(colors.shift()!);
+  const bg = colors.shift()!;
+  const w = d * 1.92;
+  const shapes = Array.from({ length: 3 }, (_, i) => ({
+    color: colors[i % colors.length],
+    tx: d / 2 + (rand() - 0.5) * d,
+    ty: d / 2 + (rand() - 0.5) * d,
+    rot: (rand() * 360).toFixed(1),
+  }));
+  return { bg, w, shapes };
 }
 
 function RuntimeIcon({ runtime }: { runtime: string }) {
@@ -49,7 +93,6 @@ function RuntimeIcon({ runtime }: { runtime: string }) {
   }
 }
 
-// Load Inter from jsDelivr (direct woff2 URL — more reliable than parsing Google Fonts CSS)
 async function loadInterFont(weight: number): Promise<ArrayBuffer | null> {
   try {
     const res = await fetch(
@@ -88,7 +131,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
   const shortDesc = desc.length > 90 ? desc.slice(0, 90) + '…' : desc;
   const fs        = titleSize(name);
-  const jazzSeed  = numFromSeed(id);
+  const jazz      = jazziconShapes(fnv1a(id), 140);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -114,7 +157,6 @@ export default async function Image({ params }: { params: Promise<{ id: string }
           display: 'flex', flexDirection: 'row',
           padding: '68px 88px 60px 88px',
         }}>
-          {/* Left: text */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingRight: 56 }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -162,8 +204,22 @@ export default async function Image({ params }: { params: Promise<{ id: string }
               // eslint-disable-next-line @next/next/no-img-element
               <img src={iconUrl} alt="" style={{ width: 140, height: 140, borderRadius: 32, objectFit: 'cover' }} />
             ) : (
-              <div style={{ borderRadius: 32, overflow: 'hidden', width: 140, height: 140, display: 'flex' }}>
-                <Jazzicon diameter={140} seed={jazzSeed} />
+              // Jazzicon rendered as inline SVG — same algorithm as react-jazzicon / JazzAvatar
+              <div style={{ width: 140, height: 140, borderRadius: 32, overflow: 'hidden', display: 'flex' }}>
+                <svg width="140" height="140" viewBox="0 0 140 140">
+                  <rect width="140" height="140" fill={jazz.bg} />
+                  {jazz.shapes.map((s, i) => (
+                    <rect
+                      key={i}
+                      x={-jazz.w / 2}
+                      y={-jazz.w / 2}
+                      width={jazz.w}
+                      height={jazz.w}
+                      transform={`translate(${s.tx},${s.ty}) rotate(${s.rot})`}
+                      fill={s.color}
+                    />
+                  ))}
+                </svg>
               </div>
             )}
           </div>
