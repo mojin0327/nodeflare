@@ -232,7 +232,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     (
       <div style={{
         width: 1200, height: 630, position: 'relative', display: 'flex',
-        background: 'linear-gradient(140deg, #ddd6fe 0%, #c4b5fd 55%, #d8b4fe 100%)',
+        background: 'linear-gradient(140deg, #ede9fe 0%, #ddd6fe 55%, #e9d5ff 100%)',
         overflow: 'hidden', fontFamily: 'Inter, sans-serif',
       }}>
         {imgSign && (

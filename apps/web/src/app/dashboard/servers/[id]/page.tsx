@@ -109,7 +109,6 @@ export default function ServerDetailPage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareTemplateName, setShareTemplateName] = useState('');
   const [shareTemplateDesc, setShareTemplateDesc] = useState('');
-  const [shareTemplateIcon, setShareTemplateIcon] = useState('');
   const [shareSelectedKeys, setShareSelectedKeys] = useState<string[]>([]);
 
   const { activeWorkspace, workspaces, isLoading: isLoadingWorkspaces } = useWorkspace();
@@ -342,7 +341,6 @@ export default function ServerDetailPage() {
     }
     setShareTemplateName(existingTemplate?.name ?? server.name);
     setShareTemplateDesc(existingTemplate?.description ?? server.description ?? '');
-    setShareTemplateIcon(existingTemplate?.icon_url ?? '');
     setShareSelectedKeys(existingTemplate?.required_env_var_keys ?? []);
     setShareDialogOpen(true);
   };
@@ -550,21 +548,6 @@ export default function ServerDetailPage() {
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-gray-700">{t('detail.shareTemplateIcon')}</Label>
-                <div className="mt-1 flex items-center gap-2">
-                  {shareTemplateIcon && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={shareTemplateIcon} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0 border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  )}
-                  <Input
-                    value={shareTemplateIcon}
-                    onChange={(e) => setShareTemplateIcon(e.target.value)}
-                    placeholder="https://example.com/icon.png"
-                    className="text-sm"
-                  />
-                </div>
-              </div>
-              <div>
                 <Label className="text-xs font-medium text-gray-700">{t('detail.shareEnvVarKeys')}</Label>
                 <p className="text-xs text-gray-400 mt-0.5 mb-2">{t('detail.shareEnvVarKeysHint')}</p>
                 {serverSecrets.length === 0 ? (
@@ -624,7 +607,6 @@ export default function ServerDetailPage() {
                     name: shareTemplateName || undefined,
                     description: shareTemplateDesc || undefined,
                     required_env_var_keys: shareSelectedKeys,
-                    icon_url: shareTemplateIcon || undefined,
                   })
                 }
                 disabled={publishTemplateMutation.isPending || !shareTemplateName.trim()}
