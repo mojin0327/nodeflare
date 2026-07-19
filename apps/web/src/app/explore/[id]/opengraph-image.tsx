@@ -148,7 +148,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const desc       = tmpl?.description ?? '';
   const runtime    = tmpl?.runtime     ?? 'node';
   const useCount   = tmpl?.use_count   ?? 0;
-  const iconUrl    = tmpl?.icon_url    ?? null;
+  const rawIconUrl = tmpl?.icon_url    ?? null;
+  const iconUrl    = rawIconUrl
+    ? rawIconUrl.startsWith('http') ? rawIconUrl : `${apiBase}${rawIconUrl}`
+    : null;
   const githubRepo = tmpl?.github_repo ?? null;
 
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
@@ -171,9 +174,9 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`${SITE_URL}/sign.png`} alt="" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.12 }} />
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${SITE_URL}/c1.png`} alt="" style={{ position: 'absolute', left: -40, bottom: 0, height: 260, width: 'auto', opacity: 0.55 }} />
+        <img src={`${SITE_URL}/c1.png`} alt="" style={{ position: 'absolute', left: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${SITE_URL}/c2.png`} alt="" style={{ position: 'absolute', right: -40, bottom: 0, height: 260, width: 'auto', opacity: 0.55 }} />
+        <img src={`${SITE_URL}/c2.png`} alt="" style={{ position: 'absolute', right: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
 
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -183,7 +186,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingRight: 56 }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`${SITE_URL}/logo2.png`} alt="Nodeflare" style={{ height: 44, marginBottom: 22, opacity: 0.8 }} />
+              <img src={`${SITE_URL}/logo2.png`} alt="Nodeflare" style={{ height: 44, width: 172, marginBottom: 22, opacity: 0.8 }} />
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 22, marginBottom: 16 }}>
                 <RuntimeIcon runtime={runtime} />
