@@ -72,7 +72,7 @@ function DeployButton({ tmpl, t, onAuthRequired, isAuthed }: {
     return (
       <Link href={`/dashboard/servers/new?template=${tmpl.id}`} className="shrink-0">
         <Button size="sm" className="bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
-          <Rocket className="w-3.5 h-3.5 mr-1.5" />
+          <Rocket className="w-4 h-4 mr-1.5" strokeWidth={2.5} />
           {t('deploy')}
         </Button>
       </Link>
@@ -84,7 +84,7 @@ function DeployButton({ tmpl, t, onAuthRequired, isAuthed }: {
       onClick={onAuthRequired}
       className="shrink-0 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white"
     >
-      <Rocket className="w-3.5 h-3.5 mr-1.5" />
+      <Rocket className="w-4 h-4 mr-1.5" strokeWidth={2.5} />
       {t('deploy')}
     </Button>
   );

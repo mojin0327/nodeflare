@@ -205,9 +205,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const useCount   = tmpl?.use_count   ?? 0;
   const githubRepo = tmpl?.github_repo ?? null;
 
-  const label     = RUNTIME_LABELS[runtime] ?? runtime;
-  const shortDesc = desc.length > 200 ? desc.slice(0, 200) + '…' : desc;
-  const fs        = titleSize(name);
+  const label          = RUNTIME_LABELS[runtime] ?? runtime;
+  const normalizedDesc = desc.replace(/[\r\n\t]+/g, ' ').replace(/  +/g, ' ').trim();
+  const shortDesc      = normalizedDesc.length > 240 ? normalizedDesc.slice(0, 240) + '…' : normalizedDesc;
+  const fs             = titleSize(name);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -218,7 +219,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     (
       <div style={{
         width: 1200, height: 630, position: 'relative', display: 'flex',
-        background: 'linear-gradient(140deg, #f8f6ff 0%, #ede9fe 60%, #faf5ff 100%)',
+        background: 'linear-gradient(140deg, #ede9fe 0%, #ddd6fe 55%, #e9d5ff 100%)',
         overflow: 'hidden', fontFamily: 'Inter, sans-serif',
       }}>
         {imgSign && (
@@ -252,7 +253,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
                 <RuntimeIcon runtime={runtime} />
                 <span style={{ color: '#374151', fontWeight: 600 }}>{label}</span>
                 <span style={{ color: '#d1d5db' }}>·</span>
-                <span style={{ color: '#9ca3af', fontWeight: 500 }}>nodeflare.tech</span>
+                <span style={{ color: '#6b7280', fontWeight: 500 }}>nodeflare.tech</span>
               </div>
 
               <div style={{ fontSize: fs, fontWeight: 800, color: '#333333', lineHeight: 1.1, letterSpacing: '-0.03em', marginBottom: shortDesc ? 20 : 0 }}>
@@ -260,7 +261,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
               </div>
 
               {shortDesc && (
-                <div style={{ fontSize: 28, fontWeight: 500, color: '#374151', lineHeight: 1.55 }}>{shortDesc}</div>
+                <div style={{
+                  fontSize: 28, fontWeight: 500, color: '#374151', lineHeight: 1.55,
+                  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 4, overflow: 'hidden',
+                }}>{shortDesc}</div>
               )}
             </div>
 
