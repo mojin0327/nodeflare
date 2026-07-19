@@ -61,20 +61,26 @@ function makeMT(seed: number) {
 
 const JAZZ_COLORS = ['#01888C', '#FC7500', '#034F5D', '#F73F01', '#FC1960', '#C7144C', '#F3C100', '#1598F2', '#2465E1', '#F19E02'];
 
-function jazziconShapes(seed: number, d: number) {
+// Render Jazzicon as a plain SVG string → base64 data URL so Satori treats it
+// as a pre-rendered image. Trying to let Satori lay out SVG elements or
+// clip absolutely-positioned divs has never produced correct output.
+function jazziconDataUrl(seed: number, d: number): string {
   const rand = makeMT(seed);
   const colors = JAZZ_COLORS.slice();
   const shift = Math.floor(rand() * colors.length);
   for (let i = 0; i < shift; i++) colors.push(colors.shift()!);
   const bg = colors.shift()!;
   const w = d * 1.92;
-  const shapes = Array.from({ length: 3 }, (_, i) => ({
-    color: colors[i % colors.length],
-    tx: d / 2 + (rand() - 0.5) * d,
-    ty: d / 2 + (rand() - 0.5) * d,
-    rot: (rand() * 360).toFixed(1),
-  }));
-  return { bg, w, shapes };
+  const rects = Array.from({ length: 3 }, () => {
+    const tx = d / 2 + (rand() - 0.5) * d;
+    const ty = d / 2 + (rand() - 0.5) * d;
+    const rot = (rand() * 360).toFixed(1);
+    const color = colors.shift()!;
+    colors.push(color);
+    return `<rect x="${-w / 2}" y="${-w / 2}" width="${w}" height="${w}" fill="${color}" transform="translate(${tx},${ty}) rotate(${rot})"/>`;
+  }).join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}" viewBox="0 0 ${d} ${d}"><rect width="${d}" height="${d}" fill="${bg}"/>${rects}</svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 }
 
 // Inline SVG paths with explicit fill — satori doesn't resolve currentColor on SVG attributes
@@ -176,7 +182,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
   const shortDesc = desc.length > 200 ? desc.slice(0, 200) + '…' : desc;
   const fs        = titleSize(name);
-  const jazz      = jazziconShapes(fnv1a(id), 140);
+  const jazzUrl   = jazziconDataUrl(fnv1a(id), 140);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -253,24 +259,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* Right: server icon — Jazzicon as CSS-transformed divs */}
+          {/* Right: server icon — pre-rendered as SVG data URL so Satori handles it as a plain image */}
           <div style={{ width: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <div style={{
-              width: 140, height: 140, borderRadius: 32, overflow: 'hidden',
-              background: jazz.bg, display: 'flex', position: 'relative',
-            }}>
-              {jazz.shapes.map((s, i) => (
-                <div key={i} style={{
-                  position: 'absolute',
-                  width: jazz.w,
-                  height: jazz.w,
-                  background: s.color,
-                  left: s.tx - jazz.w / 2,
-                  top: s.ty - jazz.w / 2,
-                  transform: `rotate(${s.rot}deg)`,
-                }} />
-              ))}
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={jazzUrl} width={140} height={140} alt="" style={{ borderRadius: 32 }} />
           </div>
         </div>
       </div>
