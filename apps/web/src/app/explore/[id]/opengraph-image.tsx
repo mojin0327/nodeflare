@@ -3,6 +3,8 @@ import { ImageResponse } from 'next/og';
 export const alt = 'MCP Server Template';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
+// Node.js runtime: allows Buffer for base64 encoding and avoids Edge fetch restrictions
+export const runtime = 'nodejs';
 
 const SITE_URL = 'https://nodeflare.tech';
 
@@ -115,6 +117,20 @@ function RuntimeIcon({ runtime }: { runtime: string }) {
   }
 }
 
+// Pre-fetch any URL as a base64 data URL so Satori never makes external network requests.
+// Returns null on any failure — callers must handle the null case gracefully.
+async function fetchAsDataUrl(url: string, revalidateSeconds = 86400): Promise<string | null> {
+  try {
+    const res = await fetch(url, { next: { revalidate: revalidateSeconds } });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') ?? 'image/png';
+    const buf = Buffer.from(await res.arrayBuffer());
+    return `data:${contentType};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 // WOFF (not WOFF2) — bundled satori/opentype.js only supports WOFF v1
 async function loadInterFont(weight: number): Promise<ArrayBuffer | null> {
   try {
@@ -136,12 +152,19 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1`
     : `${SITE_URL}/api/v1`;
 
-  const [tmpl, font500, font800] = await Promise.all([
+  // Pre-fetch everything in parallel — images as data URLs so Satori renders without
+  // making any external network requests itself (external fetches inside Satori are
+  // unreliable and can throw, causing a 500).
+  const [tmpl, font500, font800, imgSign, imgC1, imgC2, imgLogo] = await Promise.all([
     fetch(`${apiBase}/templates/${id}`, { next: { revalidate: 3600 } })
       .then(r => r.ok ? r.json() : null)
       .catch(() => null),
     loadInterFont(500),
     loadInterFont(800),
+    fetchAsDataUrl(`${SITE_URL}/sign.png`),
+    fetchAsDataUrl(`${SITE_URL}/c1.png`),
+    fetchAsDataUrl(`${SITE_URL}/c2.png`),
+    fetchAsDataUrl(`${SITE_URL}/logo2.png`),
   ]);
 
   const name       = tmpl?.name        ?? 'MCP Server Template';
@@ -167,12 +190,18 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         background: 'linear-gradient(140deg, #f8f6ff 0%, #ede9fe 60%, #faf5ff 100%)',
         overflow: 'hidden', fontFamily: 'Inter, sans-serif',
       }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${SITE_URL}/sign.png`} alt="" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.12 }} />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${SITE_URL}/c1.png`} alt="" style={{ position: 'absolute', left: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${SITE_URL}/c2.png`} alt="" style={{ position: 'absolute', right: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
+        {imgSign && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imgSign} alt="" style={{ position: 'absolute', top: 0, left: 0, width: 1200, height: 630, objectFit: 'cover', opacity: 0.12 }} />
+        )}
+        {imgC1 && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imgC1} alt="" style={{ position: 'absolute', left: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
+        )}
+        {imgC2 && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imgC2} alt="" style={{ position: 'absolute', right: -40, bottom: 0, height: 260, width: 260, opacity: 0.55 }} />
+        )}
 
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -181,8 +210,12 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingRight: 56 }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`${SITE_URL}/logo2.png`} alt="Nodeflare" style={{ height: 44, width: 172, marginBottom: 22, opacity: 0.8 }} />
+              {imgLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imgLogo} alt="Nodeflare" style={{ height: 44, width: 172, marginBottom: 22, opacity: 0.8 }} />
+              ) : (
+                <div style={{ height: 44, marginBottom: 22, display: 'flex', alignItems: 'center', fontSize: 28, fontWeight: 800, color: '#6d28d9' }}>Nodeflare</div>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 22, marginBottom: 16 }}>
                 <RuntimeIcon runtime={runtime} />
@@ -220,11 +253,11 @@ export default async function Image({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* Right: server icon — Jazzicon as CSS-transformed divs (no SVG transform attribute) */}
+          {/* Right: server icon — Jazzicon as CSS-transformed divs */}
           <div style={{ width: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <div style={{
               width: 140, height: 140, borderRadius: 32, overflow: 'hidden',
-              background: jazz.bg, position: 'relative',
+              background: jazz.bg, display: 'flex', position: 'relative',
             }}>
               {jazz.shapes.map((s, i) => (
                 <div key={i} style={{
