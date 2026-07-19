@@ -148,14 +148,10 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const desc       = tmpl?.description ?? '';
   const runtime    = tmpl?.runtime     ?? 'node';
   const useCount   = tmpl?.use_count   ?? 0;
-  const rawIconUrl = tmpl?.icon_url    ?? null;
-  const iconUrl    = rawIconUrl
-    ? rawIconUrl.startsWith('http') ? rawIconUrl : `${apiBase}${rawIconUrl}`
-    : null;
   const githubRepo = tmpl?.github_repo ?? null;
 
   const label     = RUNTIME_LABELS[runtime] ?? runtime;
-  const shortDesc = desc.length > 90 ? desc.slice(0, 90) + '…' : desc;
+  const shortDesc = desc.length > 200 ? desc.slice(0, 200) + '…' : desc;
   const fs        = titleSize(name);
   const jazz      = jazziconShapes(fnv1a(id), 140);
 
@@ -226,27 +222,22 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 
           {/* Right: server icon — Jazzicon as CSS-transformed divs (no SVG transform attribute) */}
           <div style={{ width: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {iconUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={iconUrl} alt="" style={{ width: 140, height: 140, borderRadius: 32, objectFit: 'cover' }} />
-            ) : (
-              <div style={{
-                width: 140, height: 140, borderRadius: 32, overflow: 'hidden',
-                background: jazz.bg, display: 'flex', position: 'relative',
-              }}>
-                {jazz.shapes.map((s, i) => (
-                  <div key={i} style={{
-                    position: 'absolute',
-                    width: jazz.w,
-                    height: jazz.w,
-                    background: s.color,
-                    left: s.tx - jazz.w / 2,
-                    top: s.ty - jazz.w / 2,
-                    transform: `rotate(${s.rot}deg)`,
-                  }} />
-                ))}
-              </div>
-            )}
+            <div style={{
+              width: 140, height: 140, borderRadius: 32, overflow: 'hidden',
+              background: jazz.bg, position: 'relative',
+            }}>
+              {jazz.shapes.map((s, i) => (
+                <div key={i} style={{
+                  position: 'absolute',
+                  width: jazz.w,
+                  height: jazz.w,
+                  background: s.color,
+                  left: s.tx - jazz.w / 2,
+                  top: s.ty - jazz.w / 2,
+                  transform: `rotate(${s.rot}deg)`,
+                }} />
+              ))}
+            </div>
           </div>
         </div>
       </div>
