@@ -205,10 +205,23 @@ export default async function Image({ params }: { params: Promise<{ id: string }
   const useCount   = tmpl?.use_count   ?? 0;
   const githubRepo = tmpl?.github_repo ?? null;
 
-  const label          = RUNTIME_LABELS[runtime] ?? runtime;
+  const label = RUNTIME_LABELS[runtime] ?? runtime;
+
+  // CJK文字（日本語・中国語・韓国語）を2単位、その他を1単位として幅を計算し
+  // テキストエリア幅808px / fontSize28 ≈ 57単位/行 × 4行 = 228単位でカット
   const normalizedDesc = desc.replace(/[\r\n\t]+/g, ' ').replace(/  +/g, ' ').trim();
-  const shortDesc      = normalizedDesc.length > 240 ? normalizedDesc.slice(0, 240) + '…' : normalizedDesc;
-  const fs             = titleSize(name);
+  const shortDesc = (() => {
+    const MAX_UNITS = 228;
+    let units = 0;
+    for (let i = 0; i < normalizedDesc.length; i++) {
+      const code = normalizedDesc.charCodeAt(i);
+      units += (code >= 0x1100) ? 2 : 1;
+      if (units > MAX_UNITS) return normalizedDesc.slice(0, i) + '…';
+    }
+    return normalizedDesc;
+  })();
+
+  const fs = titleSize(name);
 
   const fonts = [
     ...(font500 ? [{ name: 'Inter', data: font500, weight: 500 as const, style: 'normal' as const }] : []),
@@ -219,7 +232,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
     (
       <div style={{
         width: 1200, height: 630, position: 'relative', display: 'flex',
-        background: 'linear-gradient(140deg, #ede9fe 0%, #ddd6fe 55%, #e9d5ff 100%)',
+        background: 'linear-gradient(140deg, #ddd6fe 0%, #c4b5fd 55%, #d8b4fe 100%)',
         overflow: 'hidden', fontFamily: 'Inter, sans-serif',
       }}>
         {imgSign && (
@@ -263,7 +276,7 @@ export default async function Image({ params }: { params: Promise<{ id: string }
               {shortDesc && (
                 <div style={{
                   fontSize: 28, fontWeight: 500, color: '#374151', lineHeight: 1.55,
-                  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 4, overflow: 'hidden',
+                  maxHeight: 174, overflow: 'hidden',
                 }}>{shortDesc}</div>
               )}
             </div>
