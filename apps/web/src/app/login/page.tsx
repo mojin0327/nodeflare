@@ -36,8 +36,9 @@ export default function LoginPage() {
   const [isEmailNotVerified, setIsEmailNotVerified] = useState(false);
   const [loadingType, setLoadingType] = useState<LoadingType>(null);
 
-  const githubLoginUrl = authUrl('github', returnTo);
-  const googleLoginUrl = authUrl('google', returnTo);
+  const dest = isSafeReturnTo(returnTo) ? returnTo! : '/dashboard';
+  const githubLoginUrl = authUrl('github', dest);
+  const googleLoginUrl = authUrl('google', dest);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
