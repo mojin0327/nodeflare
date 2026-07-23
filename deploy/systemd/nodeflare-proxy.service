@@ -1,0 +1,18 @@
+[Unit]
+Description=NodeFlare Proxy (MCP request router)
+After=network.target
+
+[Service]
+Type=simple
+User=nodeflare
+Group=nodeflare
+EnvironmentFile=/opt/nodeflare/env/proxy.env
+ExecStart=/opt/nodeflare/bin/mcp-proxy
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodeflare-proxy
+
+[Install]
+WantedBy=multi-user.target

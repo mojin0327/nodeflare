@@ -417,7 +417,11 @@ async fn resolve_commands<F: RepoFiles + ?Sized>(
                 if has_build {
                     d.build_command = Some(match pm {
                         NodePm::Pnpm => {
-                            format!("pnpm install && pnpm --filter ./{} run build", member)
+                            // Trailing ... = includeDependencies: builds workspace deps
+                            // (e.g. shared utils packages) before the target, in topological order.
+                            // --if-present must come before the script name so pnpm interprets it,
+                            // not the script itself.
+                            format!("pnpm --filter {{./{member}}}... run --if-present build")
                         }
                         _ => format!("{} install && {} run build -w {}", pm.cli(), pm.cli(), member),
                     });

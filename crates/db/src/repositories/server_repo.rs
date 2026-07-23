@@ -7,7 +7,7 @@ use uuid::Uuid;
 const SERVER_COLS: &str = "id, workspace_id, name, slug, description, github_repo, \
     github_branch, github_installation_id, runtime, visibility, access_mode, transport, \
     status, endpoint_url, rate_limit_per_minute, region, root_directory, mcp_path, \
-    entry_command, build_command, auth_enabled, memory_mb, port, fly_app_name, \
+    entry_command, build_command, auth_enabled, memory_mb, port, container_name, \
     tool_list_filter_by_scope, tool_schema_slim, tool_search_mode, tool_code_mode, \
     upstream_oauth_provider, upstream_oauth_scopes, upstream_oauth_authorization_url, \
     upstream_oauth_token_url, upstream_oauth_client_id, upstream_oauth_client_secret, \
@@ -16,7 +16,7 @@ const SERVER_COLS: &str = "id, workspace_id, name, slug, description, github_rep
 const SERVER_COLS_S: &str = "s.id, s.workspace_id, s.name, s.slug, s.description, s.github_repo, \
     s.github_branch, s.github_installation_id, s.runtime, s.visibility, s.access_mode, s.transport, \
     s.status, s.endpoint_url, s.rate_limit_per_minute, s.region, s.root_directory, s.mcp_path, \
-    s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.fly_app_name, \
+    s.entry_command, s.build_command, s.auth_enabled, s.memory_mb, s.port, s.container_name, \
     s.tool_list_filter_by_scope, s.tool_schema_slim, s.tool_search_mode, s.tool_code_mode, \
     s.upstream_oauth_provider, s.upstream_oauth_scopes, s.upstream_oauth_authorization_url, \
     s.upstream_oauth_token_url, s.upstream_oauth_client_id, s.upstream_oauth_client_secret, \
@@ -134,9 +134,9 @@ impl ServerRepository {
         let transport_str = data.transport.to_string();
 
         // Generate the id in Rust (rather than relying on the DB default) so we can derive
-        // the collision-free Fly app name from the SAME id and persist both atomically.
+        // the collision-free container name from the SAME id and persist both atomically.
         let id = Uuid::new_v4();
-        let fly_app_name = McpServer::new_fly_app_name(id);
+        let container_name = McpServer::new_container_name(id);
 
         let server = sqlx::query_as::<_, McpServer>(
             &format!(
@@ -144,7 +144,7 @@ impl ServerRepository {
                     workspace_id, name, slug, description, github_repo, github_branch, \
                     github_installation_id, runtime, visibility, access_mode, transport, region, \
                     root_directory, mcp_path, entry_command, auth_enabled, build_command, memory_mb, \
-                    id, fly_app_name, port, upstream_oauth_provider, upstream_oauth_scopes, \
+                    id, container_name, port, upstream_oauth_provider, upstream_oauth_scopes, \
                     upstream_oauth_authorization_url, upstream_oauth_token_url, \
                     upstream_oauth_client_id, upstream_oauth_client_secret \
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
@@ -171,7 +171,7 @@ impl ServerRepository {
         .bind(&data.build_command)
         .bind(data.memory_mb)
         .bind(id)
-        .bind(&fly_app_name)
+        .bind(&container_name)
         .bind(data.port)
         .bind(&data.upstream_oauth_provider)
         .bind(&data.upstream_oauth_scopes)

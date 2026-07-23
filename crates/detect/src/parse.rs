@@ -184,7 +184,13 @@ pub fn prefix_entry_with_subdir(entry: &str, subdir: &str) -> String {
 }
 
 /// Derive a Node start command from `package.json` contents.
-/// Priority: `scripts.start` (→ `<pm> start`) > `main` (→ `node <main>`) > `bin`.
+/// Priority: `scripts.start` (→ `<pm> start`) > `bin` (→ `node <bin>`) > `main`.
+///
+/// Matches npm exec / npx resolution: `bin` declares CLI executables installed
+/// into PATH, while `main` is the module entry consumed by `require()`/`import`.
+/// Running `main` directly as a process is not its intended use and many packages
+/// that publish both a library API (`main`) and a CLI binary (`bin`) exit
+/// immediately when their `main` is executed directly.
 pub fn parse_node_entry(package_json: &str, pm: NodePm) -> Option<String> {
     let pkg: serde_json::Value = serde_json::from_str(package_json).ok()?;
 
@@ -196,12 +202,6 @@ pub fn parse_node_entry(package_json: &str, pm: NodePm) -> Option<String> {
         .unwrap_or(false)
     {
         return Some(format!("{} start", pm.cli()));
-    }
-
-    if let Some(main) = pkg.get("main").and_then(|v| v.as_str()) {
-        if !main.trim().is_empty() {
-            return Some(format!("node {}", main.trim()));
-        }
     }
 
     match pkg.get("bin") {
@@ -224,6 +224,12 @@ pub fn parse_node_entry(package_json: &str, pm: NodePm) -> Option<String> {
             }
         }
         _ => {}
+    }
+
+    if let Some(main) = pkg.get("main").and_then(|v| v.as_str()) {
+        if !main.trim().is_empty() {
+            return Some(format!("node {}", main.trim()));
+        }
     }
 
     None
@@ -287,17 +293,36 @@ mod tests {
 
     #[test]
     fn node_entry_priority() {
+        // scripts.start wins over everything
         assert_eq!(
             parse_node_entry(r#"{"scripts":{"start":"node x"}}"#, NodePm::Pnpm).as_deref(),
             Some("pnpm start")
         );
+        // main alone still works as fallback
         assert_eq!(
             parse_node_entry(r#"{"main":"dist/index.js"}"#, NodePm::Npm).as_deref(),
             Some("node dist/index.js")
         );
+        // bin alone works
         assert_eq!(
             parse_node_entry(r#"{"name":"p","bin":{"p":"build/cli.js"}}"#, NodePm::Npm).as_deref(),
             Some("node build/cli.js")
+        );
+        // bin beats main when both are present (library+CLI package pattern)
+        assert_eq!(
+            parse_node_entry(
+                r#"{"name":"my-pkg","main":"dist/index.cjs","bin":{"my-pkg":"./dist/cli.js"}}"#,
+                NodePm::Npm
+            ).as_deref(),
+            Some("node ./dist/cli.js")
+        );
+        // scripts.start beats bin
+        assert_eq!(
+            parse_node_entry(
+                r#"{"scripts":{"start":"node server.js"},"bin":{"x":"cli.js"}}"#,
+                NodePm::Npm
+            ).as_deref(),
+            Some("npm start")
         );
     }
 

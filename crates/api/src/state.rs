@@ -2,7 +2,6 @@ use fred::prelude::RedisClient;
 use mcp_auth::{CryptoService, JwtService};
 use mcp_billing::{BillingService, WebhookHandler};
 use mcp_common::AppConfig;
-use mcp_container::FlyioRuntime;
 use mcp_db::DbPool;
 use mcp_email::EmailService;
 use mcp_github::GitHubApp;
@@ -24,7 +23,8 @@ pub struct AppState {
     pub billing: Option<BillingService>,
     pub webhook_handler: Option<WebhookHandler>,
     pub email: Option<EmailService>,
-    pub fly_runtime: Option<FlyioRuntime>,
+    /// URL of the Builder's internal HTTP API (for exec/stats/metrics from API → Builder)
+    pub builder_internal_url: String,
     pub cache: ApiCache,
     /// Shared, connection-pooled HTTP client (keep-alive + HTTP/2). Reused for outbound
     /// calls like the repo-inspect GitHub requests so each request avoids a cold TLS
@@ -101,29 +101,8 @@ impl AppState {
             }
         };
 
-        // Initialize Fly.io runtime (optional)
-        let fly_runtime = match (
-            std::env::var("FLY_API_TOKEN"),
-            std::env::var("FLY_ORG_SLUG"),
-        ) {
-            (Ok(api_token), Ok(org_slug)) => {
-                let region = std::env::var("FLY_REGION").unwrap_or_else(|_| "nrt".to_string());
-                match FlyioRuntime::new(api_token, org_slug, region) {
-                    Ok(runtime) => {
-                        tracing::info!("Fly.io runtime initialized");
-                        Some(runtime)
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to initialize Fly.io runtime: {}", e);
-                        None
-                    }
-                }
-            }
-            _ => {
-                tracing::warn!("Fly.io not configured - container features disabled");
-                None
-            }
-        };
+        let builder_internal_url = std::env::var("BUILDER_INTERNAL_URL")
+            .unwrap_or_else(|_| "http://localhost:8083".to_string());
 
         // Shared outbound HTTP client: pooled keep-alive connections so repeated/parallel
         // GitHub calls (repo inspect) skip the TLS handshake and reuse one HTTP/2 conn.
@@ -147,7 +126,7 @@ impl AppState {
             billing,
             webhook_handler,
             email,
-            fly_runtime,
+            builder_internal_url,
             cache,
             http,
         }

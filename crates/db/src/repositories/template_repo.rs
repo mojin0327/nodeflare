@@ -11,7 +11,7 @@ const COLS: &str = "
     st.github_repo, st.github_branch, st.runtime, st.transport, st.mcp_path,
     st.entry_command, st.build_command, st.root_directory, st.auth_enabled,
     st.memory_mb, st.port, st.upstream_oauth_provider, st.upstream_oauth_scopes,
-    st.required_env_var_keys, st.icon_url, st.use_count, st.created_at, st.updated_at
+    st.required_env_var_keys, st.use_count, st.created_at, st.updated_at
 ";
 
 impl ServerTemplateRepository {
@@ -95,9 +95,9 @@ impl ServerTemplateRepository {
                 github_repo, github_branch, runtime, transport, mcp_path,
                 entry_command, build_command, root_directory, auth_enabled,
                 memory_mb, port, upstream_oauth_provider, upstream_oauth_scopes,
-                required_env_var_keys, icon_url
+                required_env_var_keys
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
             ON CONFLICT (server_id) DO UPDATE SET
                 name                    = EXCLUDED.name,
                 description             = EXCLUDED.description,
@@ -115,14 +115,13 @@ impl ServerTemplateRepository {
                 upstream_oauth_provider = EXCLUDED.upstream_oauth_provider,
                 upstream_oauth_scopes   = EXCLUDED.upstream_oauth_scopes,
                 required_env_var_keys   = EXCLUDED.required_env_var_keys,
-                icon_url                = EXCLUDED.icon_url,
                 updated_at              = NOW()
             RETURNING
                 id, server_id, owner_id, workspace_id, name, description,
                 github_repo, github_branch, runtime, transport, mcp_path,
                 entry_command, build_command, root_directory, auth_enabled,
                 memory_mb, port, upstream_oauth_provider, upstream_oauth_scopes,
-                required_env_var_keys, icon_url, use_count, created_at, updated_at
+                required_env_var_keys, use_count, created_at, updated_at
             "#,
         )
         .bind(data.server_id)
@@ -144,7 +143,6 @@ impl ServerTemplateRepository {
         .bind(&data.upstream_oauth_provider)
         .bind(&data.upstream_oauth_scopes)
         .bind(&data.required_env_var_keys)
-        .bind(&data.icon_url)
         .fetch_one(pool)
         .await?;
 

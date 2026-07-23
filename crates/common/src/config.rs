@@ -10,7 +10,7 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     pub github: GithubConfig,
     pub google: GoogleConfig,
-    pub flyio: FlyioConfig,
+    pub container: ContainerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -172,18 +172,27 @@ impl Default for GoogleConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct FlyioConfig {
-    pub api_token: String,
-    pub org_slug: String,
-    pub region: String,
+pub struct ContainerConfig {
+    /// Base registry path, e.g. `ghcr.io/your-org`
+    pub registry_base: String,
+    /// PAT / token for authenticating to the container registry
+    pub registry_token: String,
+    /// Directory where Unix Domain Sockets for MCP containers are created (e.g. `/var/run/mcp`)
+    pub socket_dir: String,
+    /// Host directory for persistent container data (e.g. `/var/lib/mcp-data`)
+    pub data_dir: String,
+    /// URL of the Builder service's internal HTTP API (used by API to exec/stats)
+    pub builder_internal_url: String,
 }
 
-impl Default for FlyioConfig {
+impl Default for ContainerConfig {
     fn default() -> Self {
         Self {
-            api_token: String::new(),
-            org_slug: "personal".to_string(),
-            region: "nrt".to_string(), // Tokyo
+            registry_base: String::new(),
+            registry_token: String::new(),
+            socket_dir: "/var/run/mcp".to_string(),
+            data_dir: "/var/lib/mcp-data".to_string(),
+            builder_internal_url: "http://localhost:8083".to_string(),
         }
     }
 }
@@ -310,10 +319,15 @@ impl AppConfig {
                 client_secret: env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default(),
                 redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_default(),
             },
-            flyio: FlyioConfig {
-                api_token: env::var("FLY_API_TOKEN").unwrap_or_default(),
-                org_slug: env::var("FLY_ORG_SLUG").unwrap_or_else(|_| "personal".to_string()),
-                region: env::var("FLY_REGION").unwrap_or_else(|_| "nrt".to_string()),
+            container: ContainerConfig {
+                registry_base: env::var("CONTAINER_REGISTRY_BASE").unwrap_or_default(),
+                registry_token: env::var("CONTAINER_REGISTRY_TOKEN").unwrap_or_default(),
+                socket_dir: env::var("CONTAINER_SOCKET_DIR")
+                    .unwrap_or_else(|_| "/var/run/mcp".to_string()),
+                data_dir: env::var("CONTAINER_DATA_DIR")
+                    .unwrap_or_else(|_| "/var/lib/mcp-data".to_string()),
+                builder_internal_url: env::var("BUILDER_INTERNAL_URL")
+                    .unwrap_or_else(|_| "http://localhost:8083".to_string()),
             },
         })
     }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
-use axum::{routing::get, Router};
+use axum::{routing::{get, post}, Router};
 use mcp_auth::CryptoService;
 use mcp_common::{types::LogStream, AppConfig, EventPublisher};
 use mcp_db::{CreateSecret, DeploymentRepository, ErrorHintRepository, NotificationSettingsRepository, RegionStatus, SecretRepository, ServerRegionRepository, ServerRepository, UpdateDeployment, UpdateServerRegion, UserPreferencesRepository, UserRepository, WorkspaceRepository};
@@ -12,10 +12,9 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod containerd;
 mod flyctl;
-mod flyio;
 
-// Note: docker module kept for reference but not used (using flyctl remote builder instead)
 #[allow(dead_code)]
 mod docker;
 
@@ -384,25 +383,24 @@ async fn run_orphan_destroy_sweeper(ctx: Arc<BuilderContext>) {
             DELETING_STUCK_TIMEOUT_MINUTES
         );
         for server in stuck {
-            match flyctl::destroy_app(&ctx.config, &server.fly_app_name).await {
+            match containerd::destroy_container(&server.container_name).await {
                 Ok(()) => {
                     if let Err(e) = ServerRepository::delete(&ctx.db, server.id).await {
                         tracing::error!(
                             "Orphan sweeper: destroyed {} but failed to delete row {}: {}",
-                            server.fly_app_name, server.id, e
+                            server.container_name, server.id, e
                         );
                     } else {
                         tracing::info!(
                             "Orphan sweeper: torn down {} and removed server {}",
-                            server.fly_app_name, server.id
+                            server.container_name, server.id
                         );
                     }
                 }
                 Err(e) => {
-                    // Leave in `deleting` for the next sweep — don't lose the record.
                     tracing::warn!(
                         "Orphan sweeper: destroy of {} (server {}) failed, will retry: {}",
-                        server.fly_app_name, server.id, e
+                        server.container_name, server.id, e
                     );
                 }
             }
@@ -532,21 +530,105 @@ async fn main() -> Result<()> {
         .backend(destroy_storage)
         .build_fn(handle_destroy_job);
 
-    // Start health check HTTP server in background (required for Fly.io to keep machine running)
-    let health_port = std::env::var("HEALTH_PORT").unwrap_or_else(|_| "8080".to_string());
-    let health_addr = format!("0.0.0.0:{}", health_port);
+    // HTTP server: health + internal API (exec / stats / metrics from API)
+    let http_port = std::env::var("BUILDER_HTTP_PORT").unwrap_or_else(|_| "8083".to_string());
+    let http_addr = format!("0.0.0.0:{}", http_port);
+    let builder_token = std::env::var("BUILDER_TOKEN").unwrap_or_default();
 
-    let health_router = Router::new()
+    let http_router = Router::new()
         .route("/health", get(|| async { "OK" }))
-        .route("/", get(|| async { "MCP Cloud Builder Worker" }));
+        .route("/", get(|| async { "NodeFlare Builder" }))
+        .route("/internal/exec/:container", post({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::Json<serde_json::Value>| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    let container = path.0;
+                    let command = body.get("command").and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    if command.is_empty() {
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "command required"})));
+                    }
+                    let output = tokio::process::Command::new("nerdctl")
+                        .arg("exec").arg(&container).args(&command)
+                        .output().await;
+                    match output {
+                        Ok(out) => {
+                            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+                            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+                            let exit_code = out.status.code().unwrap_or(-1);
+                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"stdout": stdout, "stderr": stderr, "exit_code": exit_code})))
+                        }
+                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
+                    }
+                }
+            }
+        }))
+        .route("/internal/stats", get({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    // nerdctl ps --filter label=nodeflare.container --format json
+                    let output = tokio::process::Command::new("nerdctl")
+                        .args(["ps", "--filter", "label=nodeflare.container", "--format", "{{.Names}}\t{{.Status}}"])
+                        .output().await;
+                    match output {
+                        Ok(out) => {
+                            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"containers": text})))
+                        }
+                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
+                    }
+                }
+            }
+        }))
+        .route("/internal/metrics/:container", get({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    let container = path.0;
+                    // nerdctl stats --no-stream <container> returns memory usage
+                    let output = tokio::process::Command::new("nerdctl")
+                        .args(["stats", "--no-stream", "--format", "{{.MemUsage}}", &container])
+                        .output().await;
+                    match output {
+                        Ok(out) => {
+                            let mem_usage = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"container": container, "mem_usage": mem_usage})))
+                        }
+                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
+                    }
+                }
+            }
+        }));
 
-    let health_listener = TcpListener::bind(&health_addr).await?;
-    tracing::info!("Health check server listening on {}", health_addr);
+    let http_listener = TcpListener::bind(&http_addr).await?;
+    tracing::info!("Builder HTTP server listening on {}", http_addr);
 
-    // Spawn health server in background task
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(health_listener, health_router).await {
-            tracing::error!("Health server error: {}", e);
+        if let Err(e) = axum::serve(http_listener, http_router).await {
+            tracing::error!("Builder HTTP server error: {}", e);
         }
     });
 
@@ -835,36 +917,64 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
         canonical_subdir
     };
 
-    // Strategy 3: a member of an npm/yarn workspaces monorepo cannot be built from
-    // its own subdirectory — its tsconfig typically extends the repo root and its
-    // dependencies are hoisted to the root node_modules. When the target is such a
-    // member and the user did not pin an entry command, build from the repo ROOT and
-    // point the entry at the member's output (e.g. `node src/filesystem/dist/index.js`),
-    // detected from the member's own manifest. Otherwise keep the subdirectory context.
+    // Strategy 3: a member of a workspaces monorepo cannot be built from its own
+    // subdirectory — tsconfig typically extends the repo root and workspace dependencies
+    // (internal packages like mcp-utils) are only resolvable from the root.
+    // Always build from the repo ROOT for workspace members, then:
+    //   a) auto-detect the entry command when the user hasn't set one, and
+    //   b) for pnpm workspaces without a user-specified build command, auto-generate
+    //      `pnpm --filter {./subdir}... run build --if-present`.
+    //      The trailing `...` is pnpm's "includeDependencies" selector — it runs the
+    //      member AND all workspace packages it depends on, in topological order
+    //      (dependencies compiled before their dependents). Leading `...` would be
+    //      "includeDependents" (the reverse direction) and is incorrect here.
     let mut build_context = actual_source_dir.clone();
     if !job.root_directory.is_empty()
         && job.root_directory != "."
         && job.root_directory != "/"
-        && job.entry_command.is_none()
     {
         let clean_root_dir = job.root_directory.trim_start_matches('/').to_string();
         let workspaces = flyctl::detect_workspace_globs(source_dir);
         if flyctl::subdir_is_workspace_member(&clean_root_dir, &workspaces) {
-            if let Some(entry) =
-                flyctl::detect_member_entry(source_dir, &actual_source_dir, &job.runtime).await
+            // Always use the monorepo root as the build context so workspace deps are
+            // available — this holds regardless of whether the user set an entry command.
+            build_context = source_dir.to_path_buf();
+
+            // Auto-detect entry command only when the user hasn't set one.
+            if job.entry_command.is_none() {
+                if let Some(entry) =
+                    flyctl::detect_member_entry(source_dir, &actual_source_dir, &job.runtime).await
+                {
+                    let prefixed = flyctl::prefix_entry_with_subdir(&entry, &clean_root_dir);
+                    log_to_db_and_ws(
+                        &ctx,
+                        job.deployment_id,
+                        format!(
+                            "Workspace monorepo member detected — building from repo root with entry `{}`",
+                            prefixed
+                        ),
+                    )
+                    .await;
+                    job.entry_command = Some(prefixed);
+                }
+            }
+
+            // For pnpm workspaces without a user-specified build command, auto-generate
+            // a command that builds the target member AND its workspace dependencies.
+            if job.build_command.is_none()
+                && (source_dir.join("pnpm-workspace.yaml").exists()
+                    || source_dir.join("pnpm-workspace.yml").exists())
             {
-                let prefixed = flyctl::prefix_entry_with_subdir(&entry, &clean_root_dir);
+                let cmd = format!(
+                    "pnpm --filter {{./{clean_root_dir}}}... run --if-present build"
+                );
                 log_to_db_and_ws(
                     &ctx,
                     job.deployment_id,
-                    format!(
-                        "Workspace monorepo member detected — building from repo root with entry `{}`",
-                        prefixed
-                    ),
+                    format!("pnpm workspace member — auto-generated build command: {cmd}"),
                 )
                 .await;
-                job.entry_command = Some(prefixed);
-                build_context = source_dir.to_path_buf();
+                job.build_command = Some(cmd);
             }
         }
     }
@@ -1007,7 +1117,7 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
     let build_result = match tokio::time::timeout(
         std::time::Duration::from_secs(BUILD_DEPLOY_TIMEOUT_SECS),
         async {
-            let deploy = flyctl::build_and_deploy(
+            let deploy = containerd::build_and_run(
                 &ctx.config,
                 &job,
                 &build_context,
@@ -1027,23 +1137,19 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                     Ok(deploy)
                 }
                 flyctl::ProbeOutcome::Broken(detail) => {
-                    // Surface the real reason: the adapter's 500 only says the child
-                    // exited, so fetch the server's own logs and show the actual error
-                    // (e.g. `Cannot find module '/app/dist/index.js'`) instead of a
-                    // generic "check the server logs".
-                    let server_logs = flyctl::fetch_app_logs(&ctx.config, &deploy.app_name)
+                    let server_logs = containerd::fetch_container_logs(&deploy.container_name)
                         .await
                         .map(|l| flyctl::extract_error_lines(&l, 12))
                         .filter(|s| !s.is_empty());
                     let message = match server_logs {
                         Some(logs) => format!(
-                            "Deployment reached Fly.io but the MCP server did not start. \
+                            "Container started but the MCP server did not respond. \
                             This is usually a wrong startup command or missing build output.\n\n\
                             Server error:\n{}",
                             logs
                         ),
                         None => format!(
-                            "Deployment reached Fly.io but the MCP server did not start \
+                            "Container started but the MCP server did not respond \
                             ({}). This is usually a wrong startup command or missing build output.",
                             detail
                         ),
@@ -1105,7 +1211,7 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                 tracing::error!("Failed to update server status to Running: {}", e);
             }
 
-            // Update region status with machine_id
+            // Update region status; store container_name as the machine_id
             if let Err(e) = ServerRegionRepository::update(
                 &ctx.db,
                 job.server_id,
@@ -1113,7 +1219,7 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                 UpdateServerRegion {
                     status: Some(RegionStatus::Running),
                     endpoint_url: Some(deploy_result.endpoint_url),
-                    machine_id: deploy_result.machine_id,
+                    machine_id: Some(deploy_result.container_name),
                 },
             )
             .await
@@ -1535,8 +1641,8 @@ async fn handle_deploy_job(job: DeployJob, ctx: Data<Arc<BuilderContext>>) -> Re
         .await
         .ok();
 
-    // Deploy to Fly.io
-    match flyio::deploy(&ctx.config, &job).await {
+    // Run the pre-built container
+    match containerd::run_container(&ctx.config, &job).await {
         Ok(endpoint_url) => {
             DeploymentRepository::update(
                 &ctx.db,
@@ -1678,23 +1784,20 @@ async fn handle_deploy_job(job: DeployJob, ctx: Data<Arc<BuilderContext>>) -> Re
     Ok(())
 }
 
-/// Tear down a deleted server's Fly.io app. Retries transient failures with backoff;
-/// destroying a missing app is a no-op, so this converges to "app is gone".
+/// Tear down a deleted server's container. Retries transient failures with backoff;
+/// destroying a missing container is a no-op, so this converges to "container is gone".
 async fn handle_destroy_job(job: DestroyJob, ctx: Data<Arc<BuilderContext>>) -> Result<(), Error> {
-    tracing::info!("Processing destroy job: app={}, server={}", job.app_name, job.server_id);
+    tracing::info!("Processing destroy job: container={}, server={}", job.app_name, job.server_id);
 
     const ATTEMPTS: usize = 5;
     let mut last_err = None;
     for attempt in 1..=ATTEMPTS {
-        match flyctl::destroy_app(&ctx.config, &job.app_name).await {
+        match containerd::destroy_container(&job.app_name).await {
             Ok(()) => {
-                tracing::info!("Fly.io app {} destroyed (server {})", job.app_name, job.server_id);
-                // Teardown confirmed — complete the soft-delete by hard-deleting the row.
-                // (The API only marked it `deleting`.) If this DB delete fails the row stays
-                // in `deleting` and the sweeper will retry; destroying a missing app is a no-op.
+                tracing::info!("Container {} destroyed (server {})", job.app_name, job.server_id);
                 if let Err(e) = ServerRepository::delete(&ctx.db, job.server_id).await {
                     tracing::error!(
-                        "Fly app {} destroyed but failed to hard-delete server row {}: {}",
+                        "Container {} destroyed but failed to hard-delete server row {}: {}",
                         job.app_name, job.server_id, e
                     );
                     return Err(Error::Failed(Arc::new(e.into())));
@@ -1703,12 +1806,11 @@ async fn handle_destroy_job(job: DestroyJob, ctx: Data<Arc<BuilderContext>>) -> 
             }
             Err(e) => {
                 tracing::warn!(
-                    "destroy_app {} attempt {}/{} failed: {}",
+                    "destroy_container {} attempt {}/{} failed: {}",
                     job.app_name, attempt, ATTEMPTS, e
                 );
                 last_err = Some(e);
                 if attempt < ATTEMPTS {
-                    // Backoff: 5s, 10s, 20s, 30s.
                     let secs = (5u64 << (attempt - 1)).min(30);
                     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
                 }

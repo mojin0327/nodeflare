@@ -25,7 +25,6 @@ pub struct ServerTemplate {
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Vec<String>,
     pub required_env_var_keys: Vec<String>,
-    pub icon_url: Option<String>,
     pub use_count: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -52,5 +51,4 @@ pub struct CreateServerTemplate {
     pub upstream_oauth_provider: Option<String>,
     pub upstream_oauth_scopes: Vec<String>,
     pub required_env_var_keys: Vec<String>,
-    pub icon_url: Option<String>,
 }

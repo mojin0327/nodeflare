@@ -1,11 +1,6 @@
 use anyhow::{Context, Result};
-use mcp_common::AppConfig;
 use mcp_queue::{BuildJob, SecretEnv};
-use serde::Deserialize;
 use std::path::Path;
-use std::process::Stdio;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 /// Minimum secret-value length we will substring-redact. Replacing a 1-3 char value
 /// (e.g. a port number used as a "secret") would corrupt unrelated log text, so we
@@ -42,7 +37,7 @@ fn token_redaction_patterns() -> &'static [regex::Regex] {
 
 /// Sanitize log output to prevent leaking secret values.
 /// Replaces known secret values, and any credential-shaped token, with "[REDACTED]".
-fn sanitize_log_output(output: &str, secrets: &[SecretEnv]) -> String {
+pub(crate) fn sanitize_log_output(output: &str, secrets: &[SecretEnv]) -> String {
     let mut sanitized = output.to_string();
     for secret in secrets {
         if secret.value.len() >= MIN_REDACTED_SECRET_LEN {
@@ -102,20 +97,12 @@ fn validate_secret_value(value: &str) -> Result<()> {
     Ok(())
 }
 
-const FLY_API_URL: &str = "https://api.machines.dev/v1";
-
 // ============================================================================
 // Centralized constants (single source of truth)
-//
-// Base image versions, internal ports, the probed MCP protocol version and the
-// external-command timeouts used to live as magic literals scattered across the
-// Dockerfile templates and the deploy path. Centralizing them here keeps a bump
-// (e.g. node 20 -> 22) to one edit and makes the timeouts auditable. Values are
-// unchanged from the originals.
 // ============================================================================
 
 /// Base images used by the generated Dockerfiles.
-const NODE_IMAGE: &str = "node:20-slim";
+const NODE_IMAGE: &str = "node:22-slim";
 const PYTHON_IMAGE: &str = "python:3.11-slim";
 const GO_BUILDER_IMAGE: &str = "golang:1.22";
 const RUST_BUILDER_IMAGE: &str = "rust:1.75-slim";
@@ -134,12 +121,6 @@ const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const PROBE_ATTEMPTS: usize = 8;
 const PROBE_RETRY_DELAY_SECS: u64 = 5;
 const PROBE_REQUEST_TIMEOUT_SECS: u64 = 12;
-
-/// Timeouts for external `flyctl` invocations. `apps create` / `secrets` are quick
-/// control-plane calls; `deploy` runs a full remote image build.
-const FLYCTL_CREATE_TIMEOUT_SECS: u64 = 60;
-const FLYCTL_SECRETS_TIMEOUT_SECS: u64 = 60;
-const FLYCTL_DEPLOY_TIMEOUT_SECS: u64 = 20 * 60;
 
 /// STDIO-to-SSE adapter script content (embedded at compile time)
 const STDIO_ADAPTER_JS: &str = include_str!("../assets/stdio-adapter.cjs");
@@ -592,33 +573,11 @@ pub(crate) fn prefix_entry_with_subdir(entry: &str, subdir: &str) -> String {
     mcp_detect::parse::prefix_entry_with_subdir(entry, subdir)
 }
 
-#[derive(Debug, Deserialize)]
-struct MachineInfo {
-    id: String,
-    #[serde(default)]
-    state: String,
-}
-
-/// Result of a successful deployment
-pub struct DeployResult {
-    pub endpoint_url: String,
-    pub machine_id: Option<String>,
-    /// Fly app name (e.g. "mcp-ef62e1a4"), used to fetch the server's own logs when
-    /// post-deploy verification fails.
-    pub app_name: String,
-}
-
-/// Generate fly.toml content for a server
-fn generate_fly_toml(app_name: &str, region: &str, runtime: &str, transport: &str, memory_mb: u64, port: Option<i32>) -> String {
-    // For STDIO transport, always use the STDIO adapter's port (the user's port choice,
-    // if any, applies only to native HTTP/SSE servers and is ignored here).
-    let internal_port = if transport == "stdio" {
+/// Resolve the TCP port a container will listen on, given transport/runtime/user choice.
+pub(crate) fn resolve_container_port(transport: &str, runtime: &str, port: Option<i32>) -> u16 {
+    if transport == "stdio" {
         STDIO_PORT
     } else {
-        // A user-supplied port (e.g. an existing HTTP server that hardcodes its own port
-        // instead of reading $PORT) wins; otherwise fall back to the runtime default.
-        // fly.toml sets BOTH `internal_port` and `[env] PORT` to this value, so servers
-        // that read $PORT and servers that hardcode the same port both work.
         port.and_then(|p| u16::try_from(p).ok())
             .filter(|p| *p > 0)
             .unwrap_or(match runtime {
@@ -627,43 +586,211 @@ fn generate_fly_toml(app_name: &str, region: &str, runtime: &str, transport: &st
                 "go" | "rust" => GO_RUST_PORT,
                 _ => NODE_PORT,
             })
-    };
+    }
+}
 
-    let oauth_env = if transport == "stdio" {
-        format!(
-            "\n  OAUTH_CALLBACK_PORT = \"9090\"\n  OAUTH_REDIRECT_BASE_URL = \"https://{app_name}.fly.dev\""
-        )
+/// Result of the build preparation phase.
+/// When this returns, `source_dir` contains a ready `Dockerfile` (and
+/// `stdio-adapter.cjs` for stdio transport) and secrets have been validated.
+pub(crate) struct PrepareResult {
+    /// Memory in MB to allocate for the container.
+    pub memory_mb: u64,
+    /// TCP port the MCP process will listen on inside the container.
+    pub container_port: u16,
+}
+
+/// Prepare the build context: detect project structure, validate secrets, generate
+/// Dockerfile (and stdio-adapter), write everything to `source_dir`.
+/// Everything up to — but not including — actually running the build tool.
+pub(crate) async fn prepare_build(
+    job: &BuildJob,
+    source_dir: &Path,
+    secrets: &[SecretEnv],
+    plan_memory_ceiling_mb: u64,
+    on_log: impl Fn(&str),
+) -> Result<PrepareResult> {
+    on_log(&format!("Preparing build for container: {}", job.app_name));
+
+    // Detect project structure
+    let project = detect_project_structure(source_dir).await;
+    on_log(&format!(
+        "Detected project structure: pyproject={}, uv={}, requirements={}, python_entry={:?}",
+        project.has_pyproject, project.has_uv_lock, project.has_requirements_txt, project.python_entry
+    ));
+
+    // System-dependency provisioning (headless browsers, ffmpeg, native libs…)
+    let provision = detect_provision(&project);
+    if !provision.is_empty() {
+        on_log(&format!(
+            "Detected system dependencies: apt={:?}, post_install={:?}, min_memory={:?}MB",
+            provision.apt_packages, provision.post_install, provision.min_memory_mb
+        ));
+        for w in &provision.warnings {
+            on_log(&format!("⚠️  {}", w));
+        }
+    }
+
+    // Resolve memory: user choice → detection floor → plan ceiling → minimum 256
+    let requested_mb = job.memory_mb.map(|m| m as u64).unwrap_or(256);
+    let floor_mb = provision.min_memory_mb.unwrap_or(0);
+    let memory_mb = requested_mb.max(floor_mb).min(plan_memory_ceiling_mb).max(256);
+    on_log(&format!(
+        "Container memory: {}MB (requested {}MB, floor {}MB, ceiling {}MB)",
+        memory_mb, requested_mb, floor_mb, plan_memory_ceiling_mb
+    ));
+
+    // Copy stdio-adapter if needed
+    if job.transport == "stdio" {
+        let adapter_path = source_dir.join("stdio-adapter.cjs");
+        tokio::fs::write(&adapter_path, STDIO_ADAPTER_JS)
+            .await
+            .context("Failed to write stdio-adapter.cjs")?;
+        on_log("Copied STDIO-to-SSE adapter script");
+    }
+
+    // Validate secrets before building
+    for secret in secrets {
+        validate_secret_key(&secret.key)
+            .map_err(|e| anyhow::anyhow!("Invalid secret key '{}': {}", secret.key, e))?;
+        validate_secret_value(&secret.value)
+            .map_err(|e| anyhow::anyhow!("Invalid secret value for key '{}': {}", secret.key, e))?;
+    }
+
+    // Read existing Dockerfile (if any)
+    let dockerfile_path = source_dir.join("Dockerfile");
+    let existing_dockerfile = if dockerfile_path.exists() {
+        tokio::fs::read_to_string(&dockerfile_path).await.ok()
     } else {
-        String::new()
+        None
     };
 
-    format!(
-        r#"app = "{app_name}"
-primary_region = "{region}"
+    // Discard repo Dockerfiles that can't build from this context (monorepo subdirs)
+    let existing_dockerfile = match existing_dockerfile {
+        Some(df) => match dockerfile_context_fit(&df, source_dir) {
+            DockerfileContextFit::Usable => Some(df),
+            DockerfileContextFit::Unusable { escaping } => {
+                for e in &escaping {
+                    on_log(&format!(
+                        "Ignoring repo Dockerfile: `{}` references `{}` which is not in the build context — generating a Dockerfile instead.",
+                        e.instruction, e.source
+                    ));
+                }
+                None
+            }
+        },
+        None => None,
+    };
 
-[build]
+    // Auto-upgrade Node.js version if the lockfile requires a newer one
+    let existing_dockerfile = if let Some(ref df) = existing_dockerfile {
+        let lockfile_path = source_dir.join("package-lock.json");
+        if let Ok(lockfile_str) = tokio::fs::read_to_string(&lockfile_path).await {
+            if let Some((required, culprit)) = crate::docker::max_node_requirement_from_lockfile(&lockfile_str) {
+                if let Some(current) = crate::docker::node_major_in_dockerfile(df) {
+                    if required > current {
+                        on_log(&format!("Auto-upgrading Node.js {} → {} (required by {})", current, required, culprit));
+                        Some(crate::docker::set_node_version_in_dockerfile(df, required))
+                    } else { existing_dockerfile }
+                } else { existing_dockerfile }
+            } else { existing_dockerfile }
+        } else { existing_dockerfile }
+    } else {
+        None
+    };
 
-[env]
-  PORT = "{internal_port}"{oauth_env}
+    // Extract entry command from existing Dockerfile (for STDIO transport)
+    let existing_entry_command = if job.transport == "stdio" {
+        if let Some(ref content) = existing_dockerfile {
+            let cmd = extract_dockerfile_entry_command(content);
+            if cmd.is_some() {
+                on_log("Found existing Dockerfile with entry command, will preserve it");
+            }
+            cmd
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-[http_service]
-  internal_port = {internal_port}
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 0
+    // Auto-detected startup command from project manifests
+    let detected_entry = project.detected_entry(&job.runtime);
 
-  [http_service.concurrency]
-    type = "connections"
-    hard_limit = 100
-    soft_limit = 80
+    if let Some(ref cmd) = job.entry_command {
+        on_log(&format!("Using user-specified entry command: {}", cmd));
+    } else if existing_entry_command.is_some() {
+        on_log("Using entry command from existing Dockerfile");
+    } else if let Some(ref detected) = detected_entry {
+        on_log(&format!("Auto-detected startup command: {}", detected));
+    }
 
-[[vm]]
-  memory = "{memory_mb}mb"
-  cpu_kind = "shared"
-  cpus = 1
-"#
-    )
+    // STDIO transport requires an entry command
+    if job.transport == "stdio"
+        && job.entry_command.is_none()
+        && existing_entry_command.is_none()
+        && detected_entry.is_none()
+    {
+        let workspaces = detect_workspace_globs(source_dir);
+        if !workspaces.is_empty() {
+            let members = list_workspace_members(source_dir, &workspaces);
+            let target_hint = if members.is_empty() { workspaces.join(", ") } else { members.join(", ") };
+            anyhow::bail!(
+                "This looks like a monorepo (package.json declares workspaces: {}). \
+                Nodeflare can't tell which server to run, so it won't guess. \
+                Set the Root Directory to the target package — one of: {} — \
+                and/or set the startup command (e.g. `node {}/dist/index.js`).",
+                workspaces.join(", "),
+                target_hint,
+                members.first().map(String::as_str).unwrap_or("<package>"),
+            );
+        }
+        let example = match job.runtime.as_str() {
+            "node" => "node index.js, npx @modelcontextprotocol/server-xxx",
+            "python" => "python main.py, uv run mcp-server",
+            "go" => "./your-binary-name",
+            "rust" => "./your-binary-name stdio",
+            _ => "./your-command",
+        };
+        anyhow::bail!(
+            "Entry command is required for stdio transport and could not be auto-detected. \
+            Please set the startup command in the server settings (e.g., {}).",
+            example
+        );
+    }
+
+    // Generate Dockerfile
+    let should_generate = existing_dockerfile.is_none() || job.transport == "stdio";
+    if should_generate {
+        let dockerfile_content = generate_dockerfile(
+            &job.runtime,
+            &job.transport,
+            &job.mcp_path,
+            existing_dockerfile.as_deref(),
+            existing_entry_command.as_deref(),
+            job.entry_command.as_deref(),
+            job.build_command.as_deref(),
+            &project,
+        );
+        let dockerfile_content =
+            apply_provision(&dockerfile_content, &provision).unwrap_or(dockerfile_content);
+        tokio::fs::write(&dockerfile_path, &dockerfile_content)
+            .await
+            .context("Failed to write Dockerfile")?;
+        on_log(&format!("Generated Dockerfile for {} runtime (transport: {})", job.runtime, job.transport));
+    } else if !provision.is_empty() {
+        if let Some(ref existing) = existing_dockerfile {
+            if let Some(patched) = apply_provision(existing, &provision) {
+                tokio::fs::write(&dockerfile_path, &patched)
+                    .await
+                    .context("Failed to write patched Dockerfile")?;
+                on_log("Injected system-dependency provisioning into existing Dockerfile");
+            }
+        }
+    }
+
+    let container_port = resolve_container_port(&job.transport, &job.runtime, job.port);
+
+    Ok(PrepareResult { memory_mb, container_port })
 }
 
 /// Node package manager a project uses, which drives the install/build commands.
@@ -1265,7 +1392,12 @@ fn detect_node_pm(dir: &Path) -> NodePm {
 fn node_build_step(build_command: Option<&str>, pm: NodePm) -> String {
     match build_command {
         Some(cmd) if !cmd.trim().is_empty() => format!("RUN {}", cmd.trim()),
-        _ => format!("RUN {} build --if-present", pm.runner()),
+        // --if-present must precede the script name for pnpm (trailing placement passes
+        // it as a script argument); npm accepts it in either position.
+        _ => match pm {
+            NodePm::Pnpm => "RUN pnpm run --if-present build".to_string(),
+            NodePm::Npm => "RUN npm run build --if-present".to_string(),
+        },
     }
 }
 
@@ -1279,7 +1411,11 @@ fn node_setup_section(pm: NodePm, build_command: Option<&str>) -> String {
         NodePm::Pnpm => format!(
             "COPY . .\n\
              # Install ALL deps (incl. devDependencies) so a TypeScript/bundler build can run.\n\
-             RUN corepack enable && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)\n\
+             # dangerously-allow-all-builds lets pnpm 11 run postinstall scripts without\n\
+             # ERR_PNPM_IGNORED_BUILDS; it is a no-op on older pnpm versions.\n\
+             RUN corepack enable && \\\n    \
+                 (pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true 2>/dev/null || \\\n    \
+                  pnpm install --config.dangerously-allow-all-builds=true)\n\
              # Run the project's own build script if it declares one (tsc/esbuild/etc.).\n\
              {build}"
         ),
@@ -1921,479 +2057,6 @@ fn parse_npx_command(cmd: &str) -> Option<(String, Vec<String>)> {
     Some((package, extra_args))
 }
 
-/// Build and deploy using flyctl CLI with remote builder
-pub async fn build_and_deploy(
-    config: &AppConfig,
-    job: &BuildJob,
-    source_dir: &Path,
-    secrets: &[SecretEnv],
-    plan_memory_ceiling_mb: u64,
-    on_log: impl Fn(&str),
-) -> Result<DeployResult> {
-    // Use the persisted, collision-free app name carried on the job. Never recompute it
-    // from a truncated UUID prefix — that mapped distinct servers onto the same Fly app.
-    let app_name = job.app_name.clone();
-
-    on_log(&format!("Preparing deployment for app: {}", app_name));
-
-    // Detect project structure for smarter Dockerfile generation
-    let project = detect_project_structure(source_dir).await;
-    on_log(&format!(
-        "Detected project structure: pyproject={}, uv={}, requirements={}, python_entry={:?}",
-        project.has_pyproject, project.has_uv_lock, project.has_requirements_txt, project.python_entry
-    ));
-
-    // System-dependency provisioning (headless browsers, ffmpeg, native libs…).
-    // Empty when nothing is detected — in that case every downstream step behaves
-    // exactly as before (no Dockerfile change, default memory).
-    let provision = detect_provision(&project);
-    if !provision.is_empty() {
-        on_log(&format!(
-            "Detected system dependencies: apt={:?}, post_install={:?}, min_memory={:?}MB",
-            provision.apt_packages, provision.post_install, provision.min_memory_mb
-        ));
-        for w in &provision.warnings {
-            on_log(&format!("⚠️  {}", w));
-        }
-    }
-
-    // Resolve machine memory: start from the user's choice (or 256MB default), raise
-    // it to any detection floor (headless browsers need ~2GB), then clamp to what the
-    // plan allows. Clamping the floor LAST is deliberate — a free-tier browser server
-    // stays at its small ceiling and fails honestly via the OOM hint, instead of being
-    // silently handed a 2GB machine the plan doesn't pay for.
-    let fly_toml_path = source_dir.join("fly.toml");
-    let requested_mb = job.memory_mb.map(|m| m as u64).unwrap_or(256);
-    let floor_mb = provision.min_memory_mb.unwrap_or(0);
-    let memory_mb = requested_mb
-        .max(floor_mb)
-        .min(plan_memory_ceiling_mb)
-        .max(256);
-    on_log(&format!(
-        "Machine memory: {}MB (requested {}MB, detection floor {}MB, plan ceiling {}MB)",
-        memory_mb, requested_mb, floor_mb, plan_memory_ceiling_mb
-    ));
-    let fly_toml_content =
-        generate_fly_toml(&app_name, &job.region, &job.runtime, &job.transport, memory_mb, job.port);
-    tokio::fs::write(&fly_toml_path, &fly_toml_content)
-        .await
-        .context("Failed to write fly.toml")?;
-    on_log("Generated fly.toml");
-
-    // For STDIO transport, copy the adapter script to source directory
-    if job.transport == "stdio" {
-        let adapter_path = source_dir.join("stdio-adapter.cjs");
-        tokio::fs::write(&adapter_path, STDIO_ADAPTER_JS)
-            .await
-            .context("Failed to write stdio-adapter.cjs")?;
-        on_log("Copied STDIO-to-SSE adapter script");
-    }
-
-    // Generate Dockerfile
-    let dockerfile_path = source_dir.join("Dockerfile");
-    let existing_dockerfile = if dockerfile_path.exists() {
-        tokio::fs::read_to_string(&dockerfile_path).await.ok()
-    } else {
-        None
-    };
-
-    // Judgment B: only adopt the repo's Dockerfile if it can actually build from THIS
-    // context. A Dockerfile written for a monorepo root (e.g. `COPY src/<pkg> /app`)
-    // references paths that don't exist when built from a subdirectory; adopting it
-    // would break the build and pin a stale entry command. Discard it — and, with it,
-    // any entry command we'd otherwise extract from it — and generate our own instead.
-    let existing_dockerfile = match existing_dockerfile {
-        Some(df) => match dockerfile_context_fit(&df, source_dir) {
-            DockerfileContextFit::Usable => Some(df),
-            DockerfileContextFit::Unusable { escaping } => {
-                for e in &escaping {
-                    on_log(&format!(
-                        "Ignoring repo Dockerfile: `{}` references `{}` which is not in the build context — generating a Dockerfile instead.",
-                        e.instruction, e.source
-                    ));
-                }
-                None
-            }
-        },
-        None => None,
-    };
-
-    // If the repo ships a package-lock.json, check whether transitive deps require
-    // a newer Node.js than the Dockerfile declares, and upgrade the FROM line.
-    let existing_dockerfile = if let Some(ref df) = existing_dockerfile {
-        let lockfile_path = source_dir.join("package-lock.json");
-        if let Ok(lockfile_str) = tokio::fs::read_to_string(&lockfile_path).await {
-            if let Some((required, culprit)) = crate::docker::max_node_requirement_from_lockfile(&lockfile_str) {
-                if let Some(current) = crate::docker::node_major_in_dockerfile(df) {
-                    if required > current {
-                        on_log(&format!(
-                            "Auto-upgrading Node.js {} → {} (required by {})",
-                            current, required, culprit
-                        ));
-                        Some(crate::docker::set_node_version_in_dockerfile(df, required))
-                    } else {
-                        existing_dockerfile
-                    }
-                } else {
-                    existing_dockerfile
-                }
-            } else {
-                existing_dockerfile
-            }
-        } else {
-            existing_dockerfile
-        }
-    } else {
-        None
-    };
-
-    // For STDIO transport with existing Dockerfile, extract the entry command
-    let existing_entry_command = if job.transport == "stdio" {
-        if let Some(ref content) = existing_dockerfile {
-            let cmd = extract_dockerfile_entry_command(content);
-            if cmd.is_some() {
-                on_log("Found existing Dockerfile with entry command, will preserve it");
-            }
-            cmd
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Auto-detected startup command from project manifests (used when neither the user
-    // nor an existing Dockerfile supplied one).
-    let detected_entry = project.detected_entry(&job.runtime);
-
-    // Log entry command source
-    if let Some(ref cmd) = job.entry_command {
-        on_log(&format!("Using user-specified entry command: {}", cmd));
-    } else if existing_entry_command.is_some() {
-        on_log("Using entry command from existing Dockerfile");
-    } else if let Some(ref detected) = detected_entry {
-        on_log(&format!("Auto-detected startup command: {}", detected));
-    }
-
-    // For STDIO transport an entry command is required, but auto-detection from project
-    // manifests now satisfies it. We only bail when nothing could be inferred.
-    if job.transport == "stdio"
-        && job.entry_command.is_none()
-        && existing_entry_command.is_none()
-        && detected_entry.is_none()
-    {
-        // A workspaces monorepo root has no runnable entry of its own — the build
-        // output lives under a specific member (e.g. src/filesystem/dist/index.js).
-        // Don't guess: tell the user which members exist and how to target one.
-        let workspaces = detect_workspace_globs(source_dir);
-        if !workspaces.is_empty() {
-            let members = list_workspace_members(source_dir, &workspaces);
-            let target_hint = if members.is_empty() {
-                workspaces.join(", ")
-            } else {
-                members.join(", ")
-            };
-            anyhow::bail!(
-                "This looks like a monorepo (package.json declares workspaces: {}). \
-                Nodeflare can't tell which server to run, so it won't guess. \
-                Set the Root Directory to the target package — one of: {} — \
-                and/or set the startup command (e.g. `node {}/dist/index.js`).",
-                workspaces.join(", "),
-                target_hint,
-                members.first().map(String::as_str).unwrap_or("<package>"),
-            );
-        }
-
-        let example = match job.runtime.as_str() {
-            "node" => "node index.js, npx @modelcontextprotocol/server-xxx",
-            "python" => "python main.py, uv run mcp-server",
-            "go" => "./your-binary-name",
-            "rust" => "./your-binary-name stdio",
-            _ => "./your-command",
-        };
-        anyhow::bail!(
-            "Entry command is required for stdio transport and could not be auto-detected. \
-            Please set the startup command in the server settings (e.g., {}).",
-            example
-        );
-    }
-
-    // Generate Dockerfile if needed
-    let should_generate = existing_dockerfile.is_none() || job.transport == "stdio";
-    if should_generate {
-        let dockerfile_content = generate_dockerfile(
-            &job.runtime,
-            &job.transport,
-            &job.mcp_path,
-            existing_dockerfile.as_deref(),
-            existing_entry_command.as_deref(),
-            job.entry_command.as_deref(),
-            job.build_command.as_deref(),
-            &project,
-        );
-        // Inject system-dependency provisioning (no-op when nothing was detected).
-        let dockerfile_content =
-            apply_provision(&dockerfile_content, &provision).unwrap_or(dockerfile_content);
-        tokio::fs::write(&dockerfile_path, &dockerfile_content)
-            .await
-            .context("Failed to write Dockerfile")?;
-        on_log(&format!(
-            "Generated Dockerfile for {} runtime (transport: {})",
-            job.runtime, job.transport
-        ));
-    } else if !provision.is_empty() {
-        // User-supplied Dockerfile is otherwise used as-is. When the project needs a
-        // system dependency (e.g. a Playwright browser whose version must match the
-        // installed package), patch it in before the final CMD without the user having
-        // to change their repo. No change is written if nothing safe could be injected.
-        if let Some(ref existing) = existing_dockerfile {
-            if let Some(patched) = apply_provision(existing, &provision) {
-                tokio::fs::write(&dockerfile_path, &patched)
-                    .await
-                    .context("Failed to write patched Dockerfile")?;
-                on_log("Injected system-dependency provisioning into existing Dockerfile");
-            }
-        }
-    }
-
-    // Create app if it doesn't exist
-    on_log(&format!("Creating/verifying Fly.io app: {}", app_name));
-    let create_output = tokio::time::timeout(
-        std::time::Duration::from_secs(FLYCTL_CREATE_TIMEOUT_SECS),
-        Command::new("flyctl")
-            .args(["apps", "create", &app_name, "--org", &config.flyio.org_slug])
-            .env("FLY_API_TOKEN", &config.flyio.api_token)
-            .current_dir(source_dir)
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("flyctl apps create timed out after {}s", FLYCTL_CREATE_TIMEOUT_SECS))?
-    .context("Failed to run flyctl apps create")?;
-
-    // Idempotency: a create can fail simply because the app already exists. Decide via
-    // the typed Machines REST API (authoritative) rather than CLI wording — only falling
-    // back to the English "already exists" substring if the REST check is itself
-    // inconclusive (last resort, since localized/changed CLI text would break it).
-    if !create_output.status.success() {
-        let stderr = String::from_utf8_lossy(&create_output.stderr);
-        if app_exists(config, &app_name).await {
-            tracing::info!("Fly app {} already exists; continuing", app_name);
-        } else if stderr.contains("already exists") {
-            tracing::info!("Fly app {} reported as already existing; continuing", app_name);
-        } else {
-            return Err(anyhow::anyhow!(
-                "Failed to create Fly app {}: {}",
-                app_name,
-                sanitize_log_output(stderr.trim(), secrets)
-            ));
-        }
-    }
-
-    // Set secrets if any
-    if !secrets.is_empty() {
-        // Validate all secrets before processing
-        for secret in secrets {
-            validate_secret_key(&secret.key)
-                .with_context(|| format!("Invalid secret key: {}", secret.key))?;
-            validate_secret_value(&secret.value)
-                .with_context(|| format!("Invalid secret value for key: {}", secret.key))?;
-        }
-
-        on_log(&format!("Setting {} secrets...", secrets.len()));
-        // SECURITY: feed `KEY=VALUE` pairs to `flyctl secrets import` over the child's
-        // stdin instead of passing them as argv. Secret values in argv are world-readable
-        // via `/proc/<pid>/cmdline` and `ps` for the lifetime of the process.
-        let stdin_payload: String = secrets
-            .iter()
-            .map(|s| format!("{}={}\n", s.key, s.value))
-            .collect();
-
-        let mut child = Command::new("flyctl")
-            .args(["secrets", "import", "--app", &app_name])
-            .env("FLY_API_TOKEN", &config.flyio.api_token)
-            .current_dir(source_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .context("Failed to spawn flyctl secrets import")?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(stdin_payload.as_bytes())
-                .await
-                .context("Failed to write secrets to flyctl stdin")?;
-            stdin.shutdown().await.ok(); // close stdin so flyctl proceeds
-        }
-
-        let secrets_output = tokio::time::timeout(
-            std::time::Duration::from_secs(FLYCTL_SECRETS_TIMEOUT_SECS),
-            child.wait_with_output(),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("flyctl secrets import timed out after {}s", FLYCTL_SECRETS_TIMEOUT_SECS))?
-        .context("Failed to import secrets")?;
-
-        if !secrets_output.status.success() {
-            let stderr = String::from_utf8_lossy(&secrets_output.stderr);
-            // Sanitize stderr to prevent leaking secret values in logs
-            let sanitized_stderr = sanitize_log_output(&stderr, secrets);
-            tracing::warn!("Secrets warning: {}", sanitized_stderr);
-        }
-    }
-
-    // Deploy with remote builder
-    // Note: Region is already set in fly.toml as primary_region
-    on_log("Starting remote build and deploy...");
-    let deploy_output = tokio::time::timeout(
-        std::time::Duration::from_secs(FLYCTL_DEPLOY_TIMEOUT_SECS),
-        Command::new("flyctl")
-            .args([
-                "deploy",
-                "--remote-only",
-                "--app",
-                &app_name,
-                "--yes",
-            ])
-            .env("FLY_API_TOKEN", &config.flyio.api_token)
-            .current_dir(source_dir)
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("flyctl deploy timed out after {}s", FLYCTL_DEPLOY_TIMEOUT_SECS))?
-    .context("Failed to run flyctl deploy")?;
-
-    let stdout = String::from_utf8_lossy(&deploy_output.stdout);
-    let stderr = String::from_utf8_lossy(&deploy_output.stderr);
-
-    // Log output (sanitized — stdout can echo env/secret values during a deploy).
-    let sanitized_stdout = sanitize_log_output(&stdout, secrets);
-    for line in sanitized_stdout.lines() {
-        if !line.trim().is_empty() {
-            on_log(line);
-        }
-    }
-
-    if !deploy_output.status.success() {
-        // Sanitize stderr to prevent leaking secret values in logs.
-        let sanitized_stderr = sanitize_log_output(&stderr, secrets);
-        // The full log is already streamed line-by-line to the deployment logs; the
-        // error *message* shows only the meaningful diagnostic lines so the real cause
-        // (e.g. an `npm error` or `Cannot read file '../../tsconfig.json'`) isn't buried
-        // under noise like a `tsc --help` dump.
-        for line in sanitized_stderr.lines() {
-            if !line.trim().is_empty() {
-                on_log(&format!("ERROR: {}", line));
-            }
-        }
-        let summary = extract_error_lines(&sanitized_stderr, 15);
-        let message = if summary.is_empty() { sanitized_stderr } else { summary };
-        return Err(anyhow::anyhow!("Build failed:\n{}", message));
-    }
-
-    on_log("Deployment successful!");
-    let endpoint_url = format!("https://{}.fly.dev", app_name);
-
-    // Get machine ID from Fly.io API
-    let machine_id = match get_machine_id(config, &app_name).await {
-        Ok(id) => {
-            on_log(&format!("Machine ID: {}", id));
-            Some(id)
-        }
-        Err(e) => {
-            // Non-fatal: affinity routing degrades gracefully without it, but we must
-            // not silently swallow the cause.
-            tracing::warn!("Could not resolve machine id for {}: {}", app_name, e);
-            None
-        }
-    };
-
-    Ok(DeployResult {
-        endpoint_url,
-        machine_id,
-        app_name,
-    })
-}
-
-/// Whether a Fly app exists, via the typed Machines REST API (authoritative, exit-code
-/// free). Used to make `apps create` idempotent without parsing CLI text.
-async fn app_exists(config: &AppConfig, app_name: &str) -> bool {
-    let client = reqwest::Client::new();
-    client
-        .get(format!("{}/apps/{}", FLY_API_URL, app_name))
-        .header("Authorization", format!("Bearer {}", config.flyio.api_token))
-        .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
-}
-
-/// Destroy a Fly.io app via flyctl. Idempotent: a missing app is treated as success,
-/// so retries and double-deletes are safe. Idempotency is decided primarily via the
-/// typed REST API (the app is simply gone); the English substrings are only a
-/// last-resort fallback when the REST probe is itself unavailable.
-pub(crate) async fn destroy_app(config: &AppConfig, app_name: &str) -> Result<()> {
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(FLYCTL_CREATE_TIMEOUT_SECS),
-        Command::new("flyctl")
-            .args(["apps", "destroy", app_name, "--yes"])
-            .env("FLY_API_TOKEN", &config.flyio.api_token)
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("flyctl apps destroy {} timed out", app_name))?
-    .context("Failed to run flyctl apps destroy")?;
-    if output.status.success() {
-        return Ok(());
-    }
-    // Authoritative check: if the app no longer exists, the destroy is effectively done.
-    if !app_exists(config, app_name).await {
-        return Ok(()); // already gone — idempotent
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // Last-resort fallback: REST said it still exists (or was unreachable) but the CLI
-    // explicitly reported "not found" — trust that wording rather than loop forever.
-    let lower = stderr.to_lowercase();
-    if lower.contains("not found") || lower.contains("could not find") || lower.contains("does not exist") {
-        return Ok(());
-    }
-    Err(anyhow::anyhow!("flyctl apps destroy {} failed: {}", app_name, stderr.trim()))
-}
-
-/// Get the machine ID for an app from Fly.io API. Prefers a machine in the `started`
-/// state (the one actually serving the current release) over an arbitrary entry, so
-/// affinity routing doesn't pin sessions to a stopped/replaced machine.
-async fn get_machine_id(config: &AppConfig, app_name: &str) -> Result<String> {
-    let client = reqwest::Client::new();
-
-    let response = client
-        .get(format!("{}/apps/{}/machines", FLY_API_URL, app_name))
-        .header("Authorization", format!("Bearer {}", config.flyio.api_token))
-        .send()
-        .await
-        .context("Failed to list machines")?;
-
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Failed to list machines: HTTP {}",
-            response.status()
-        ));
-    }
-
-    let machines: Vec<MachineInfo> = response.json().await?;
-    // Prefer a started machine (current release, actually serving); fall back to any.
-    machines
-        .iter()
-        .find(|m| m.state == "started")
-        .or_else(|| machines.first())
-        .map(|m| format!("{}:{}", app_name, m.id))
-        .ok_or_else(|| anyhow::anyhow!("No machines found"))
-}
-
 // ============================================================================
 // Surfacing the real failure reason
 //
@@ -2469,27 +2132,6 @@ pub(crate) fn extract_error_lines(log: &str, max_lines: usize) -> String {
     lines[start..].join("\n")
 }
 
-/// Best-effort fetch of a deployed app's recent logs (the builder image already ships
-/// `flyctl`). Used to surface why a server failed its post-deploy check. Returns None
-/// on any error or timeout — logs are an enrichment, never required.
-pub(crate) async fn fetch_app_logs(config: &AppConfig, app_name: &str) -> Option<String> {
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        Command::new("flyctl")
-            .args(["logs", "-a", app_name, "--no-tail"])
-            .env("FLY_API_TOKEN", &config.flyio.api_token)
-            .output(),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    if text.trim().is_empty() {
-        None
-    } else {
-        Some(text.into_owned())
-    }
-}
 
 // ============================================================================
 // Post-deploy MCP verification (judgment D)
@@ -3124,7 +2766,7 @@ mod tests {
         let pnpm = node_setup_section(NodePm::Pnpm, None);
         assert!(pnpm.contains("corepack enable"));
         assert!(pnpm.contains("pnpm install"));
-        assert!(pnpm.contains("pnpm run build --if-present"));
+        assert!(pnpm.contains("pnpm run --if-present build"));
         assert!(!pnpm.contains("npm ci"));
 
         // A custom build command overrides the default for either manager.

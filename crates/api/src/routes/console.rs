@@ -1,16 +1,14 @@
-use anyhow;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use mcp_container::{ContainerRuntime, ContainerStatus};
 use mcp_db::{ServerRegionRepository, ServerRepository, WorkspaceRepository};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::error::{db_error, internal_error};
+use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
 use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND};
@@ -35,7 +33,7 @@ pub struct ExecResponseBody {
     pub exit_code: i32,
 }
 
-/// Execute a command on an MCP server
+/// Execute a command on an MCP server container via Builder internal API
 pub async fn exec_command(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -68,106 +66,56 @@ pub async fn exec_command(
         return Err((StatusCode::NOT_FOUND, ERR_SERVER_NOT_FOUND.to_string()));
     }
 
-    // Get target region's machine ID
+    // Get target region's machine ID (stored as container_name)
     let target_region = if let Some(region_code) = &body.region {
-        // Use specified region
         ServerRegionRepository::find_by_server_and_region(&state.db, server_id, region_code)
             .await
             .map_err(db_error)?
             .ok_or((StatusCode::NOT_FOUND, format!("Region '{}' not found", region_code)))?
     } else {
-        // Use primary region
         ServerRegionRepository::find_primary(&state.db, server_id)
             .await
             .map_err(db_error)?
             .ok_or((StatusCode::BAD_REQUEST, "No primary region configured".to_string()))?
     };
 
-    let machine_id = target_region
+    let container_name = target_region
         .machine_id
         .ok_or((StatusCode::BAD_REQUEST, "Server not deployed in this region".to_string()))?;
 
-    // Get Fly.io runtime
-    let fly_runtime = state.fly_runtime.as_ref().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "Fly.io runtime not configured".to_string(),
-    ))?;
+    // Call Builder's /internal/exec/{container} endpoint
+    let url = format!("{}/internal/exec/{}", state.builder_internal_url, container_name);
+    let builder_token = std::env::var("BUILDER_TOKEN").unwrap_or_default();
 
-    // Extract app_name from endpoint_url (e.g., "https://mcp-xxx.fly.dev" -> "mcp-xxx")
-    let app_name = target_region
-        .endpoint_url
-        .as_ref()
-        .and_then(|url| {
-            url.replace("https://", "")
-                .replace("http://", "")
-                .split('.')
-                .next()
-                .map(|s| s.to_string())
-        })
-        .ok_or((StatusCode::BAD_REQUEST, "Cannot determine app name from endpoint".to_string()))?;
+    let payload = serde_json::json!({
+        "command": body.command,
+        "timeout": body.timeout,
+    });
 
-    // machine_id from DB is already encoded as "app_name:raw_machine_id"
-    tracing::info!("Console exec: app_name={}, machine_id={}", app_name, machine_id);
+    let mut req = state.http.post(&url).json(&payload);
+    if !builder_token.is_empty() {
+        req = req.bearer_auth(&builder_token);
+    }
 
-    // Check machine status and start if stopped
-    let status = fly_runtime
-        .status(&machine_id)
-        .await
-        .map_err(|e: anyhow::Error| internal_error("Failed to get machine status", e))?;
+    let resp = req.send().await.map_err(|e| {
+        (StatusCode::BAD_GATEWAY, format!("Builder unreachable: {}", e))
+    })?;
 
-    if status == ContainerStatus::Stopped {
-        tracing::info!("Machine is stopped, starting: {}", machine_id);
-        fly_runtime
-            .start(&machine_id)
-            .await
-            .map_err(|e: anyhow::Error| internal_error("Failed to start machine", e))?;
+    let status = resp.status();
+    let json: serde_json::Value = resp.json().await.map_err(|e| {
+        (StatusCode::BAD_GATEWAY, format!("Builder response parse error: {}", e))
+    })?;
 
-        // Wait for machine to be running (poll up to 30 seconds)
-        for i in 0..30 {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            let new_status = fly_runtime
-                .status(&machine_id)
-                .await
-                .map_err(|e: anyhow::Error| internal_error("Failed to get machine status", e))?;
-            if new_status == ContainerStatus::Running {
-                tracing::info!("Machine started successfully after {}s", i + 1);
-                break;
-            }
-            if i == 29 {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Machine failed to start in time".to_string(),
-                ));
-            }
-        }
-    } else if status == ContainerStatus::Failed {
+    if !status.is_success() {
         return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Machine is in failed state".to_string(),
-        ));
-    } else if status == ContainerStatus::Creating {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Machine is still starting up, please try again".to_string(),
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            json.get("error").and_then(|v| v.as_str()).unwrap_or("exec failed").to_string(),
         ));
     }
 
-    // Execute command
-    let result = fly_runtime
-        .exec(&machine_id, body.command, body.timeout)
-        .await
-        .map_err(|e: anyhow::Error| {
-            let err_str = e.to_string();
-            if err_str.contains("412") {
-                (StatusCode::SERVICE_UNAVAILABLE, "Machine is not running. Please try again.".to_string())
-            } else {
-                internal_error("Command execution failed", e)
-            }
-        })?;
-
     Ok(Json(ExecResponseBody {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exit_code: result.exit_code,
+        stdout: json.get("stdout").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        stderr: json.get("stderr").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        exit_code: json.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1) as i32,
     }))
 }

@@ -169,7 +169,6 @@ pub async fn publish(
             upstream_oauth_provider: server.upstream_oauth_provider.clone(),
             upstream_oauth_scopes: server.upstream_oauth_scopes.clone().unwrap_or_default(),
             required_env_var_keys: body.required_env_var_keys,
-            icon_url: body.icon_url,
         },
     )
     .await?;
@@ -257,7 +256,6 @@ fn into_public_response(t: ServerTemplate) -> ServerTemplateResponse {
         upstream_oauth_provider: t.upstream_oauth_provider,
         upstream_oauth_scopes: t.upstream_oauth_scopes,
         required_env_var_keys: t.required_env_var_keys,
-        icon_url: t.icon_url,
         use_count: t.use_count,
         created_at: t.created_at,
     }
@@ -287,7 +285,6 @@ fn into_private_response(t: ServerTemplate) -> ServerTemplatePrivateResponse {
         upstream_oauth_provider: t.upstream_oauth_provider,
         upstream_oauth_scopes: t.upstream_oauth_scopes,
         required_env_var_keys: t.required_env_var_keys,
-        icon_url: t.icon_url,
         use_count: t.use_count,
         created_at: t.created_at,
     }

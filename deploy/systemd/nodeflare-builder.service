@@ -1,0 +1,22 @@
+[Unit]
+Description=NodeFlare Builder (container build + manage worker)
+After=network.target containerd.service
+Requires=containerd.service
+
+[Service]
+Type=simple
+User=nodeflare
+Group=nodeflare
+EnvironmentFile=/opt/nodeflare/env/builder.env
+ExecStart=/opt/nodeflare/bin/mcp-builder
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodeflare-builder
+
+# Allow access to containerd socket
+SupplementaryGroups=containerd
+
+[Install]
+WantedBy=multi-user.target

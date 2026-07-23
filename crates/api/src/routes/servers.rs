@@ -866,26 +866,17 @@ pub async fn delete(
     // the builder confirms the app is gone (or a sweeper re-drives the teardown).
     ServerRepository::mark_deleting(&state.db, path.server_id).await?;
 
-    // Tear down the Fly.io app via a durable, retrying job. Use the PERSISTED app name so
+    // Tear down the container via a durable, retrying job. Use the PERSISTED container name so
     // we never recompute it from a truncated UUID prefix (which collided across tenants and
-    // could delete another tenant's app).
-    let app_name = existing.fly_app_name.clone();
+    // could delete another tenant's container).
+    let app_name = existing.container_name.clone();
 
     let destroy_job = mcp_queue::DestroyJob {
         server_id: path.server_id,
         app_name: app_name.clone(),
     };
     if let Err(e) = state.job_queue.push_destroy_job(destroy_job).await {
-        // Queue is down — fall back to an inline destroy so we still try right now.
-        tracing::warn!("Failed to enqueue destroy job for {}: {}; trying inline", app_name, e);
-        if let Some(ref fly_runtime) = state.fly_runtime {
-            if let Err(e) = fly_runtime.destroy_app(&app_name).await {
-                tracing::warn!(
-                    "Inline destroy of Fly.io app {} for server {} also failed: {}",
-                    app_name, path.server_id, e
-                );
-            }
-        }
+        tracing::warn!("Failed to enqueue destroy job for {}: {}", app_name, e);
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -1104,12 +1095,12 @@ pub async fn restart(
     deploy(State(state), auth_user, Path(path)).await
 }
 
-/// Get server metrics (CPU, memory, network)
+/// Get server metrics (memory) from Builder internal API
 pub async fn metrics(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(path): Path<ServerPath>,
-) -> Result<Json<mcp_container::AppMetrics>, AppError> {
+) -> Result<Json<serde_json::Value>, AppError> {
     // Check membership
     workspace::require_member(&state.db, path.workspace_id, auth_user.user_id).await?;
 
@@ -1122,29 +1113,20 @@ pub async fn metrics(
         return Err(AppError::not_found("Server"));
     }
 
-    // Get Fly.io runtime
-    let fly_runtime = state.fly_runtime.as_ref().ok_or_else(|| {
-        AppError::internal("Fly.io runtime not configured")
-    })?;
+    let container_name = server.container_name;
+    let url = format!("{}/internal/metrics/{}", state.builder_internal_url, container_name);
+    let builder_token = std::env::var("BUILDER_TOKEN").unwrap_or_default();
 
-    // Extract app_name from endpoint_url
-    let app_name = server
-        .endpoint_url
-        .as_ref()
-        .and_then(|url| {
-            url.replace("https://", "")
-                .replace("http://", "")
-                .split('.')
-                .next()
-                .map(|s| s.to_string())
-        })
-        .ok_or_else(|| AppError::bad_request("NO_ENDPOINT", "Server has no endpoint URL"))?;
+    let mut req = state.http.get(&url);
+    if !builder_token.is_empty() {
+        req = req.bearer_auth(&builder_token);
+    }
 
-    // Get metrics from Fly.io
-    let metrics = fly_runtime
-        .get_metrics(&app_name)
-        .await
-        .map_err(|e| AppError::internal(&format!("Failed to get metrics: {}", e)))?;
+    let resp = req.send().await
+        .map_err(|e| AppError::internal(&format!("Builder unreachable: {}", e)))?;
 
-    Ok(Json(metrics))
+    let json: serde_json::Value = resp.json().await
+        .map_err(|e| AppError::internal(&format!("Builder response error: {}", e)))?;
+
+    Ok(Json(json))
 }

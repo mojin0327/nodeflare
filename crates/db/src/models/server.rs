@@ -37,9 +37,9 @@ pub struct McpServer {
     /// Internal listening port for Streamable HTTP (SSE) servers. None = runtime default
     /// (node 3000, python 8000, go/rust 8080). Ignored for stdio (adapter owns the port).
     pub port: Option<i32>,
-    /// Fly.io app name this server deploys to. Decided ONCE at creation and persisted so
-    /// it is never recomputed from a truncated UUID prefix (which collided across tenants).
-    pub fly_app_name: String,
+    /// Container name on the bare-metal host (e.g. `mcp-<uuid-nohyphens>`). Decided ONCE at
+    /// creation and persisted so it is never recomputed from a truncated UUID prefix.
+    pub container_name: String,
     /// When true (default), the proxy filters a `tools/list` response down to the tools
     /// the calling credential may actually call (NodeFlare-auth mode), cutting the
     /// schema tokens an AI client loads upfront. Call-time scope checks apply regardless.
@@ -72,10 +72,10 @@ pub struct McpServer {
 }
 
 impl McpServer {
-    /// Canonical, collision-free Fly app name for a server: `mcp-<uuid-without-dashes>`.
+    /// Canonical, collision-free container name for a server: `mcp-<uuid-without-dashes>`.
     /// Uses the FULL UUID (128 bits) — the old `mcp-<first-segment>` scheme used only the
-    /// first 32 bits and could map two distinct servers onto the same Fly app.
-    pub fn new_fly_app_name(id: Uuid) -> String {
+    /// first 32 bits and could map two distinct servers onto the same container name.
+    pub fn new_container_name(id: Uuid) -> String {
         format!("mcp-{}", id.simple())
     }
 

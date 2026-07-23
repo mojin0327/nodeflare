@@ -74,11 +74,6 @@ struct Machine {
     state: String,
 }
 
-#[derive(Deserialize)]
-struct FlyMachine {
-    id: String,
-    state: String,
-}
 
 /// Decide whether (and where) to pin this request.
 pub async fn decide(
@@ -251,42 +246,10 @@ async fn machine_list(state: &ProxyState, app: &str) -> Vec<Machine> {
     machines
 }
 
-async fn fetch_machines(state: &ProxyState, app: &str) -> Vec<Machine> {
-    let token = &state.config.flyio.api_token;
-    if token.is_empty() {
-        return Vec::new();
-    }
-
-    let url = format!("https://api.machines.dev/v1/apps/{}/machines", app);
-    let resp = state.http_client.get(&url).bearer_auth(token).send().await;
-
-    let resp = match resp {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            tracing::warn!(
-                "affinity: Fly machines API returned {} for app {}",
-                r.status(),
-                app
-            );
-            return Vec::new();
-        }
-        Err(e) => {
-            tracing::warn!("affinity: Fly machines API error for app {}: {}", app, e);
-            return Vec::new();
-        }
-    };
-
-    match resp.json::<Vec<FlyMachine>>().await {
-        Ok(list) => list
-            .into_iter()
-            .map(|m| Machine {
-                id: m.id,
-                state: m.state,
-            })
-            .collect(),
-        Err(e) => {
-            tracing::warn!("affinity: failed to parse Fly machines for app {}: {}", app, e);
-            Vec::new()
-        }
-    }
+async fn fetch_machines(_state: &ProxyState, _app: &str) -> Vec<Machine> {
+    // In bare-metal mode, each MCP server has exactly one container on the same host.
+    // There are no remote machines to enumerate, so affinity routing always yields None
+    // (no forced_machine). Session bindings are still stored/looked up in Redis so that
+    // future multi-instance support can be added without a schema change.
+    Vec::new()
 }

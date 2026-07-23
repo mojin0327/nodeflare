@@ -251,7 +251,8 @@ async function runSandboxed(req: RunRequest): Promise<{ output?: unknown; error?
     }
   }
   console.error(`[run] no result in ${ms}ms (exit=${exitCode}, timed out or crashed)`);
-  return { error: "execution produced no result (timed out or crashed)" };
+  const hint = errText ? `\n${errText.slice(0, 500)}` : "";
+  return { error: `execution produced no result (timed out or crashed)${hint}` };
 }
 
 // Bind IPv6 (dual-stack): Fly private networking (`.internal`) is IPv6-only, so the

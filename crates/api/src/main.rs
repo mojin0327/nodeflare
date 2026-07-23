@@ -194,14 +194,6 @@ fn start_deployment_timeout_task(db_pool: mcp_db::DbPool) {
     });
 }
 
-/// "https://mcp-abc.fly.dev/" -> "mcp-abc". The Fly app name is the first host label.
-fn app_name_from_endpoint(endpoint_url: &str) -> Option<String> {
-    let host = endpoint_url.split("://").nth(1).unwrap_or(endpoint_url);
-    let host = host.split('/').next().unwrap_or(host);
-    let label = host.split('.').next().unwrap_or(host);
-    (!label.is_empty()).then(|| label.to_string())
-}
-
 /// Hourly background job: refresh upstream OAuth tokens (Google Drive, GitHub, etc.)
 /// that are within 5 days of expiry. Failures are logged but do not stop the loop.
 fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Client) {
@@ -335,34 +327,25 @@ fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Cli
     });
 }
 
-/// Background task: every interval, sample each running server's *started* Fly machines
-/// and accrue memory-weighted active time (GB-minutes) for usage billing. Billing follows
-/// real running machines, so idle (auto-stopped) time costs nothing and HA replicas count
-/// individually. This only records usage; Stripe reporting is a separate (later) step.
+/// Background task: every interval, sample each running server's container memory usage
+/// and accrue memory-weighted active time (GB-minutes) for usage billing.
 fn start_usage_sampler_task(db_pool: mcp_db::DbPool) {
-    use mcp_container::FlyioRuntime;
     use mcp_db::{RegionUsageRepository, ServerRepository};
 
-    // Resolution of the accrued time equals this interval (default 5 min).
     let interval_secs: u64 = std::env::var("USAGE_SAMPLE_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
 
-    // Build a Fly client from the same env AppState uses; skip sampling if unconfigured.
-    let fly = match (std::env::var("FLY_API_TOKEN"), std::env::var("FLY_ORG_SLUG")) {
-        (Ok(token), Ok(org)) => {
-            let region = std::env::var("FLY_REGION").unwrap_or_else(|_| "nrt".to_string());
-            FlyioRuntime::new(token, org, region).ok()
-        }
-        _ => None,
-    };
-    let Some(fly) = fly else {
-        tracing::warn!("Usage sampler disabled: Fly.io not configured");
-        return;
-    };
+    let builder_url = std::env::var("BUILDER_INTERNAL_URL")
+        .unwrap_or_else(|_| "http://localhost:8083".to_string());
+    let builder_token = std::env::var("BUILDER_TOKEN").unwrap_or_default();
 
     let interval_minutes = interval_secs as f64 / 60.0;
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
@@ -377,26 +360,30 @@ fn start_usage_sampler_task(db_pool: mcp_db::DbPool) {
                 }
             };
 
-            // NOTE: one Fly API call per running server per tick. Fine at small scale;
-            // batch/cache by org if the running fleet grows large.
             for server in servers {
-                let Some(app_name) = server.endpoint_url.as_deref().and_then(app_name_from_endpoint)
-                else {
-                    continue;
-                };
-                let started = match fly.list_started_machine_memory_mb(&app_name).await {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::warn!("usage sampler: list machines failed for {}: {}", app_name, e);
-                        continue;
-                    }
-                };
-                if started.is_empty() {
-                    continue; // auto-stopped / idle → no billable time
+                // Verify container is running via Builder stats endpoint
+                let stats_url = format!("{}/internal/stats", builder_url);
+                let mut req = http.get(&stats_url);
+                if !builder_token.is_empty() {
+                    req = req.bearer_auth(&builder_token);
                 }
-                // GB-minutes this tick = sum over started machines of (memory_gb) * interval.
-                let gb: f64 = started.iter().map(|mb| *mb as f64 / 1024.0).sum();
-                let gb_minutes = gb * interval_minutes;
+                let running = match req.send().await {
+                    Ok(resp) => resp.json::<serde_json::Value>().await
+                        .map(|v| v.get("containers").and_then(|c| c.as_str())
+                            .map(|s| s.contains(&server.container_name))
+                            .unwrap_or(false))
+                        .unwrap_or(false),
+                    Err(_) => false,
+                };
+
+                if !running {
+                    continue;
+                }
+
+                // Accrue usage based on configured memory
+                let memory_mb = server.memory_mb.unwrap_or(256) as f64;
+                let gb_minutes = (memory_mb / 1024.0) * interval_minutes;
+
                 if let Err(e) = RegionUsageRepository::add_gb_minutes(
                     &db_pool,
                     server.workspace_id,
