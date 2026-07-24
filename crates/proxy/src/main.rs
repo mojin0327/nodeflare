@@ -61,6 +61,10 @@ pub struct ProxyState {
     /// Meta-tool definitions loaded from the DB at startup. The name/description are
     /// configurable per row; handler_type routes to the correct in-proxy logic.
     pub meta_tools: Vec<mcp_db::ProxyMetaTool>,
+    /// Builder internal API URL for scale-to-zero wake/stop operations.
+    pub builder_internal_url: Option<String>,
+    /// Bearer token for authenticating to Builder internal API.
+    pub builder_token: Option<String>,
 }
 
 #[tokio::main]
@@ -191,6 +195,9 @@ async fn main() -> Result<()> {
         });
     tracing::info!("Loaded {} proxy meta-tool definitions", meta_tools.len());
 
+    let builder_internal_url = std::env::var("BUILDER_INTERNAL_URL").ok();
+    let builder_token = std::env::var("BUILDER_TOKEN").ok();
+
     let state = Arc::new(ProxyState {
         config: config.clone(),
         db: db_pool,
@@ -204,6 +211,8 @@ async fn main() -> Result<()> {
         embedding,
         code_runner,
         meta_tools,
+        builder_internal_url,
+        builder_token,
     });
 
     let app = Router::new()
@@ -381,13 +390,16 @@ async fn proxy_handler(
 ) -> Result<Response, ProxyError> {
     let start = Instant::now();
 
-    // Detect browser access and redirect to main site
-    // Browsers send Accept: text/html, while MCP clients send Accept: application/json or text/event-stream
-    // Only treat it as a browser navigation when it asks for HTML and does NOT also
-    // accept an MCP content type. MCP clients send Accept: application/json and/or
-    // text/event-stream, so requiring their absence avoids redirecting a real MCP
-    // client that happens to include text/html in a broad Accept header.
-    let is_browser = request.method() == axum::http::Method::GET
+    // Detect browser access and redirect to main site.
+    // OAuth paths (/authorize, /callback, /oauth/*) must pass through even from browsers
+    // because the OAuth flow opens these in the user's browser intentionally.
+    let path = uri.path();
+    let is_oauth_path = path.starts_with("/authorize")
+        || path.starts_with("/callback")
+        || path.starts_with("/oauth/");
+
+    let is_browser = !is_oauth_path
+        && request.method() == axum::http::Method::GET
         && request
             .headers()
             .get(axum::http::header::ACCEPT)
@@ -433,10 +445,66 @@ async fn proxy_handler(
     let server = resolve_server(&state, &server_slug).await?;
     tracing::info!("proxy_handler: server resolved, id={}, auth_enabled={}", server.id, server.auth_enabled);
 
-    // 2b. Status gate: only serve servers that are actually running. Without this a
-    // stopped/building/failed/deleting server would keep accepting traffic (and pay
-    // the full upstream timeout failing) instead of returning promptly.
-    if !server.is_serveable() {
+    // 2b. Scale-to-zero: wake stopped containers before the status gate.
+    if server.status == "stopped" {
+        if let (Some(builder_url), Some(token)) = (&state.builder_internal_url, &state.builder_token) {
+            tracing::info!("proxy_handler: waking stopped server {} (container={})", server.id, server.container_name);
+            let wake_url = format!("{}/internal/start/{}", builder_url, server.container_name);
+            let wake_result = state.http_client
+                .post(&wake_url)
+                .bearer_auth(token)
+                .send()
+                .await;
+            match wake_result {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("proxy_handler: wake request accepted for {}", server.container_name);
+                    // Invalidate cache so next resolve picks up running status
+                    state.redis_cache.invalidate_server(&server_slug).await;
+                    // Wait up to 30s for container port to respond
+                    if let Some(endpoint) = &server.endpoint_url {
+                        let port = endpoint.trim_start_matches("http://127.0.0.1:");
+                        let addr = format!("127.0.0.1:{}", port);
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                        loop {
+                            if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+                                tracing::info!("proxy_handler: container {} is up", server.container_name);
+                                break;
+                            }
+                            if std::time::Instant::now() >= deadline {
+                                tracing::warn!("proxy_handler: container {} did not come up in 30s", server.container_name);
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                    }
+                }
+                Ok(r) => tracing::warn!("proxy_handler: wake returned {}", r.status()),
+                Err(e) => tracing::warn!("proxy_handler: wake failed: {}", e),
+            }
+        }
+    }
+
+    // Record last_request timestamp for scale-to-zero idle detection (fire-and-forget)
+    {
+        let redis = state.redis.clone();
+        let server_id = server.id.to_string();
+        tokio::spawn(async move {
+            let key = format!("last_request:{}", server_id);
+            let _: Result<(), _> = fred::prelude::KeysInterface::set(
+                &redis,
+                &key,
+                chrono::Utc::now().timestamp(),
+                Some(fred::types::Expiration::EX(600)),
+                None,
+                false,
+            ).await;
+        });
+    }
+
+    // 2c. Status gate: reject servers that are not running (building/failed/deleting).
+    // Note: stopped servers are handled above (wake-up flow), so by this point they are
+    // either running or timed out (we fall through and let the upstream fail naturally).
+    if server.status != "running" && server.status != "stopped" {
         tracing::warn!("proxy_handler: server {} not serveable (status={})", server.id, server.status);
         return Err(ProxyError::ServiceUnavailable(format!(
             "Server is not running (status: {})",

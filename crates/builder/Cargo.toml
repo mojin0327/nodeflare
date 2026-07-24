@@ -49,6 +49,7 @@ apalis-redis.workspace = true
 # `tower::retry::{RetryLayer, Policy}` for the custom bounded-backoff retry policy.
 tower = { version = "0.5", features = ["retry"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "tokio-rustls-comp"] }
+rustls = { version = "0.23", features = ["ring"] }
 
 # Utils
 uuid.workspace = true

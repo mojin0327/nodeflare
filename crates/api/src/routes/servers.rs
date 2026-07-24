@@ -1095,16 +1095,14 @@ pub async fn restart(
     deploy(State(state), auth_user, Path(path)).await
 }
 
-/// Get server metrics (memory) from Builder internal API
+/// Get server metrics from Builder internal API, returned in AppMetrics format
 pub async fn metrics(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(path): Path<ServerPath>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Check membership
     workspace::require_member(&state.db, path.workspace_id, auth_user.user_id).await?;
 
-    // Get server
     let server = ServerRepository::find_by_id(&state.db, path.server_id)
         .await?
         .ok_or_else(|| AppError::not_found("Server"))?;
@@ -1122,11 +1120,47 @@ pub async fn metrics(
         req = req.bearer_auth(&builder_token);
     }
 
-    let resp = req.send().await
-        .map_err(|e| AppError::internal(&format!("Builder unreachable: {}", e)))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
 
-    let json: serde_json::Value = resp.json().await
-        .map_err(|e| AppError::internal(&format!("Builder response error: {}", e)))?;
+    let (mem_used_mb, mem_total_mb) = match req.send().await {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                // mem_usage format: "123MiB / 512MiB"
+                let mem_str = json.get("mem_usage").and_then(|v| v.as_str()).unwrap_or("");
+                let parts: Vec<&str> = mem_str.split(" / ").collect();
+                let parse_mb = |s: &str| -> f64 {
+                    let s = s.trim();
+                    if s.ends_with("GiB") {
+                        s.trim_end_matches("GiB").trim().parse::<f64>().unwrap_or(0.0) * 1024.0
+                    } else if s.ends_with("MiB") {
+                        s.trim_end_matches("MiB").trim().parse::<f64>().unwrap_or(0.0)
+                    } else if s.ends_with("kB") || s.ends_with("KiB") {
+                        s.trim_end_matches(|c| c == 'B' || c == 'i' || c == 'k' || c == 'K')
+                            .trim().parse::<f64>().unwrap_or(0.0) / 1024.0
+                    } else {
+                        0.0
+                    }
+                };
+                let used = parts.first().map(|s| parse_mb(s)).unwrap_or(0.0);
+                let total = parts.get(1).map(|s| parse_mb(s)).unwrap_or(0.0);
+                (used, total)
+            } else {
+                (0.0, 0.0)
+            }
+        }
+        Err(_) => (0.0, 0.0),
+    };
 
-    Ok(Json(json))
+    let point = |value: f64| serde_json::json!([{"timestamp": now, "value": value, "instance": null}]);
+
+    Ok(Json(serde_json::json!({
+        "memory_used": point(mem_used_mb),
+        "memory_total": point(mem_total_mb),
+        "cpu_usage": point(0.0),
+        "network_rx": point(0.0),
+        "network_tx": point(0.0),
+    })))
 }

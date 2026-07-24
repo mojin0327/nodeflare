@@ -222,7 +222,7 @@ impl AppConfig {
                 frontend_url: env::var("FRONTEND_URL")
                     .unwrap_or_else(|_| "http://localhost:3000".to_string()),
                 proxy_base_domain: env::var("PROXY_BASE_DOMAIN")
-                    .unwrap_or_else(|_| "mcp.cloud".to_string()),
+                    .unwrap_or_else(|_| "nodeflare.tech".to_string()),
             },
             database: DatabaseConfig {
                 url: env::var("DATABASE_URL")

@@ -13,7 +13,9 @@ use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod containerd;
+mod firecracker;
 mod flyctl;
+mod tap;
 
 #[allow(dead_code)]
 mod docker;
@@ -410,6 +412,9 @@ async fn run_orphan_destroy_sweeper(ctx: Arc<BuilderContext>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // musl builds require explicit CryptoProvider selection
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -540,7 +545,7 @@ async fn main() -> Result<()> {
         .route("/", get(|| async { "NodeFlare Builder" }))
         .route("/internal/exec/:container", post({
             let tok = builder_token.clone();
-            move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>, body: axum::Json<serde_json::Value>| {
+            move |headers: axum::http::HeaderMap, _path: axum::extract::Path<String>, _body: axum::Json<serde_json::Value>| {
                 let tok = tok.clone();
                 async move {
                     if !tok.is_empty() {
@@ -549,25 +554,9 @@ async fn main() -> Result<()> {
                             return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                         }
                     }
-                    let container = path.0;
-                    let command = body.get("command").and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    if command.is_empty() {
-                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "command required"})));
-                    }
-                    let output = tokio::process::Command::new("nerdctl")
-                        .arg("exec").arg(&container).args(&command)
-                        .output().await;
-                    match output {
-                        Ok(out) => {
-                            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-                            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-                            let exit_code = out.status.code().unwrap_or(-1);
-                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"stdout": stdout, "stderr": stderr, "exit_code": exit_code})))
-                        }
-                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
-                    }
+                    // Firecracker VMs are not containers: exec requires a guest agent
+                    // (e.g. vsock-based) which is not yet implemented.
+                    (axum::http::StatusCode::NOT_IMPLEMENTED, axum::Json(serde_json::json!({"error": "exec is not supported for Firecracker VMs"})))
                 }
             }
         }))
@@ -582,17 +571,9 @@ async fn main() -> Result<()> {
                             return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                         }
                     }
-                    // nerdctl ps --filter label=nodeflare.container --format json
-                    let output = tokio::process::Command::new("nerdctl")
-                        .args(["ps", "--filter", "label=nodeflare.container", "--format", "{{.Names}}\t{{.Status}}"])
-                        .output().await;
-                    match output {
-                        Ok(out) => {
-                            let text = String::from_utf8_lossy(&out.stdout).into_owned();
-                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"containers": text})))
-                        }
-                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
-                    }
+                    // List running Firecracker VMs by active socket files + live process check
+                    let vms = firecracker::list_running_vms().await;
+                    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"vms": vms, "count": vms.len()})))
                 }
             }
         }))
@@ -608,16 +589,46 @@ async fn main() -> Result<()> {
                         }
                     }
                     let container = path.0;
-                    // nerdctl stats --no-stream <container> returns memory usage
-                    let output = tokio::process::Command::new("nerdctl")
-                        .args(["stats", "--no-stream", "--format", "{{.MemUsage}}", &container])
-                        .output().await;
-                    match output {
-                        Ok(out) => {
-                            let mem_usage = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"container": container, "mem_usage": mem_usage})))
+                    // Read VM RSS from the Firecracker process's /proc entry
+                    match firecracker::vm_rss_bytes(&container).await {
+                        Some(rss_bytes) => {
+                            let rss_mb = rss_bytes / (1024 * 1024);
+                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
+                                "container": container,
+                                "mem_rss_bytes": rss_bytes,
+                                "mem_rss_mb": rss_mb,
+                            })))
                         }
-                        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
+                        None => {
+                            (axum::http::StatusCode::NOT_FOUND, axum::Json(serde_json::json!({
+                                "error": "VM not running or metrics unavailable"
+                            })))
+                        }
+                    }
+                }
+            }
+        }))
+        .route("/internal/start/:container", post({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    let container = path.0;
+                    match firecracker::restore(&container).await {
+                        Ok(_port) => {
+                            tracing::info!("scale-to-zero: restored VM {} from snapshot", container);
+                            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"started": container})))
+                        }
+                        Err(e) => {
+                            tracing::warn!("scale-to-zero: restore of {} failed: {}", container, e);
+                            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()})))
+                        }
                     }
                 }
             }
@@ -631,6 +642,9 @@ async fn main() -> Result<()> {
             tracing::error!("Builder HTTP server error: {}", e);
         }
     });
+
+    // Scale-to-zero scaler: stop idle containers every 5 minutes
+    tokio::spawn(run_scale_to_zero_scaler(context.db.clone(), config.redis.url.clone()));
 
     // Reconcile-on-startup + periodic reaper for deployments stuck in a non-terminal
     // state (worker died mid-build, OOM, etc.) so they don't show "Building" forever.
@@ -1233,7 +1247,7 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
             send_deploy_notification(&ctx, job.server_id, true, None).await;
         }
         Err(e) => {
-            tracing::error!("Build failed: {}", e);
+            tracing::error!("Build failed: {:#}", e);
             let error_msg = e.to_string();
 
             // Get user's locale preference and analyze error with localized hints
@@ -1824,4 +1838,85 @@ async fn handle_destroy_job(job: DestroyJob, ctx: Data<Arc<BuilderContext>>) -> 
             .unwrap_or_else(|| anyhow::anyhow!("destroy failed"))
             .into(),
     )))
+}
+
+/// Scale-to-zero scaler: every 5 minutes, stop containers that have had no
+/// requests for more than 5 minutes (Redis key `last_request:{server_id}` absent or expired).
+async fn run_scale_to_zero_scaler(db: mcp_db::DbPool, redis_url: String) {
+    let idle_threshold_secs: u64 = std::env::var("SCALE_TO_ZERO_IDLE_SECS")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    let check_interval_secs: u64 = std::env::var("SCALE_TO_ZERO_CHECK_SECS")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+
+    let redis_client = match redis::Client::open(redis_url.as_str()) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("scale-to-zero: failed to connect to Redis: {}", e);
+            return;
+        }
+    };
+
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(check_interval_secs)).await;
+
+        let servers = match ServerRepository::list_running(&db).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("scale-to-zero: failed to list running servers: {}", e);
+                continue;
+            }
+        };
+
+        let mut conn = match redis_client.get_multiplexed_async_connection().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("scale-to-zero: Redis connection failed: {}", e);
+                continue;
+            }
+        };
+
+        let now = chrono::Utc::now().timestamp();
+
+        for server in servers {
+            let key = format!("last_request:{}", server.id);
+            let last_ts: Option<i64> = redis::cmd("GET")
+                .arg(&key)
+                .query_async(&mut conn)
+                .await
+                .ok()
+                .and_then(|v: Option<String>| v?.parse().ok());
+
+            let is_idle = match last_ts {
+                None => true,
+                Some(ts) => (now - ts) as u64 >= idle_threshold_secs,
+            };
+
+            if !is_idle {
+                continue;
+            }
+
+            // If no Firecracker socket exists the VM is not running here — either it
+            // crashed, was never deployed on this host, or is still on Fly.io.
+            // Skip silently; the proxy will trigger a fresh boot when needed.
+            if !firecracker::vm_socket_exists(&server.container_name) {
+                tracing::debug!("scale-to-zero: no VM socket for {} — skipping", server.container_name);
+                continue;
+            }
+
+            tracing::info!("scale-to-zero: snapshotting idle VM {} (server={})", server.container_name, server.id);
+
+            match firecracker::snapshot(&server.container_name).await {
+                Ok(()) => {
+                    if let Err(e) = ServerRepository::update_status(&db, server.id, mcp_common::types::ServerStatus::Stopped, None).await {
+                        tracing::error!("scale-to-zero: failed to update status for {}: {}", server.id, e);
+                    } else {
+                        tracing::info!("scale-to-zero: VM {} snapshotted and stopped", server.container_name);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("scale-to-zero: snapshot of {} failed: {}", server.container_name, e);
+                }
+            }
+        }
+    }
 }

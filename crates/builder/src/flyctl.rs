@@ -573,30 +573,12 @@ pub(crate) fn prefix_entry_with_subdir(entry: &str, subdir: &str) -> String {
     mcp_detect::parse::prefix_entry_with_subdir(entry, subdir)
 }
 
-/// Resolve the TCP port a container will listen on, given transport/runtime/user choice.
-pub(crate) fn resolve_container_port(transport: &str, runtime: &str, port: Option<i32>) -> u16 {
-    if transport == "stdio" {
-        STDIO_PORT
-    } else {
-        port.and_then(|p| u16::try_from(p).ok())
-            .filter(|p| *p > 0)
-            .unwrap_or(match runtime {
-                "node" => NODE_PORT,
-                "python" => PYTHON_PORT,
-                "go" | "rust" => GO_RUST_PORT,
-                _ => NODE_PORT,
-            })
-    }
-}
-
 /// Result of the build preparation phase.
 /// When this returns, `source_dir` contains a ready `Dockerfile` (and
 /// `stdio-adapter.cjs` for stdio transport) and secrets have been validated.
 pub(crate) struct PrepareResult {
-    /// Memory in MB to allocate for the container.
+    /// Memory in MB to allocate for the Firecracker VM.
     pub memory_mb: u64,
-    /// TCP port the MCP process will listen on inside the container.
-    pub container_port: u16,
 }
 
 /// Prepare the build context: detect project structure, validate secrets, generate
@@ -788,9 +770,7 @@ pub(crate) async fn prepare_build(
         }
     }
 
-    let container_port = resolve_container_port(&job.transport, &job.runtime, job.port);
-
-    Ok(PrepareResult { memory_mb, container_port })
+    Ok(PrepareResult { memory_mb })
 }
 
 /// Node package manager a project uses, which drives the install/build commands.
