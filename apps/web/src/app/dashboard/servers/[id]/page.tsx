@@ -651,7 +651,7 @@ export default function ServerDetailPage() {
 
       {/* Info Pills */}
       <div className="flex items-center gap-2 text-xs sm:text-sm overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible">
-        {server.status === 'running' && server.endpoint_url && workspaceSlug && (
+        {(server.status === 'running' || server.status === 'stopped') && server.endpoint_url && workspaceSlug && (
           <button
             onClick={() => {
               navigator.clipboard.writeText(mcpPublicUrl(workspaceSlug, server.slug, server.mcp_path));

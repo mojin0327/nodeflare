@@ -1795,6 +1795,14 @@ RUN sh -c 'command -v node >/dev/null 2>&1 || \
 COPY stdio-adapter.cjs /app/stdio-adapter.cjs
 RUN chmod 644 /app/stdio-adapter.cjs
 
+# Pre-download CLI tool templates at build time so the first scan is not delayed by a
+# network fetch at runtime.  HOME override directs nuclei to the mcpuser template path.
+# Silently skipped for images that don't have nuclei (or any other such tool) installed.
+RUN command -v nuclei >/dev/null 2>&1 && \
+    HOME=/home/mcpuser nuclei -update-templates 2>/dev/null && \
+    chown -R 1000:1000 /home/mcpuser/nuclei-templates 2>/dev/null \
+    || true
+
 # Preserve ENV variables from original Dockerfile (especially PATH)
 {env_lines}
 

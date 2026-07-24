@@ -98,7 +98,7 @@ pub async fn snapshot(container_name: &str) -> Result<()> {
     // Pause must complete within a bounded time to avoid hanging the scaler.
     timeout(
         Duration::from_secs(API_CALL_TIMEOUT_SECS),
-        api_put(&socket, "/vm", &json!({"state": "Paused"})),
+        api_patch(&socket, "/vm", &json!({"state": "Paused"})),
     )
     .await
     .map_err(|_| anyhow::anyhow!("pause timed out after {}s", API_CALL_TIMEOUT_SECS))?
@@ -492,11 +492,22 @@ async fn configure_and_start(
 /// Content-Length is the byte length of the JSON body, which is correct for
 /// HTTP (Content-Length is measured in bytes, not characters).
 async fn api_put(socket: &Path, path: &str, body: &serde_json::Value) -> Result<()> {
+    api_request(socket, "PUT", path, body).await
+}
+
+/// HTTP PATCH over the Firecracker Unix domain socket.
+/// Used for VM state changes (Paused/Resumed) which require PATCH /vm.
+async fn api_patch(socket: &Path, path: &str, body: &serde_json::Value) -> Result<()> {
+    api_request(socket, "PATCH", path, body).await
+}
+
+async fn api_request(socket: &Path, method: &str, path: &str, body: &serde_json::Value) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let body_str = body.to_string();
     let request = format!(
-        "PUT {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "{} {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        method,
         path,
         body_str.len(),
         body_str,
@@ -534,9 +545,9 @@ async fn api_put(socket: &Path, path: &str, body: &serde_json::Value) -> Result<
             .await.unwrap_or(Ok(0)).unwrap_or(0);
         let body = std::str::from_utf8(&body_buf[..n]).unwrap_or("").trim();
         if body.is_empty() {
-            anyhow::bail!("Firecracker API PUT {} → {}", path, status_line);
+            anyhow::bail!("Firecracker API {} {} → {}", method, path, status_line);
         }
-        anyhow::bail!("Firecracker API PUT {} → {} | {}", path, status_line, body);
+        anyhow::bail!("Firecracker API {} {} → {} | {}", method, path, status_line, body);
     }
     Ok(())
 }
@@ -650,10 +661,16 @@ fn socket_path(container_name: &str) -> PathBuf {
     PathBuf::from(SOCKET_DIR).join(format!("{}.socket", container_name))
 }
 
-/// Returns true if a live Firecracker socket exists for the given container.
-/// Used by the scale-to-zero scaler to skip servers with no actual VM.
+/// Returns true if a Firecracker VM is actually alive for the given container.
+/// Checks by attempting a real TCP connection to the Unix socket — a stale socket
+/// file left behind after a crash would pass an existence check but fail here.
 pub fn vm_socket_exists(container_name: &str) -> bool {
-    socket_path(container_name).exists()
+    let path = socket_path(container_name);
+    if !path.exists() {
+        return false;
+    }
+    // Attempt a synchronous connect to distinguish a live VM from a stale socket.
+    std::os::unix::net::UnixStream::connect(&path).is_ok()
 }
 
 fn snapshot_dir(container_name: &str) -> PathBuf {
