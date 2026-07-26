@@ -14,6 +14,9 @@ const SERVER_CACHE_TTL_SECS: i64 = 30;
 /// Cache TTL for workspace plan/subscription used on the quota hot path (short so
 /// plan/subscription changes converge quickly without an explicit invalidate).
 const WORKSPACE_CACHE_TTL_SECS: i64 = 30;
+/// Cache TTL for tools/list (24 hours). A container's tool surface is fixed until
+/// the image is rebuilt; the API invalidates this key on redeploy.
+const TOOLS_LIST_CACHE_TTL_SECS: i64 = 86400;
 
 /// Cached API key data (subset of ApiKey for caching)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,6 +308,32 @@ impl RedisCache {
     pub async fn invalidate_workspace(&self, workspace_id: &uuid::Uuid) {
         let cache_key = Self::workspace_cache_key(workspace_id);
         let _: Result<(), _> = self.client.del(&cache_key).await;
+    }
+
+    fn tools_list_key(server_id: &uuid::Uuid) -> String {
+        format!("proxy:tools_list:{}", server_id)
+    }
+
+    /// Get the cached raw (id-stripped) tools/list response body for a server.
+    pub async fn get_tools_list(&self, server_id: &uuid::Uuid) -> Option<Vec<u8>> {
+        let key = Self::tools_list_key(server_id);
+        let result: Option<Vec<u8>> = self.client.get(&key).await.ok()?;
+        result
+    }
+
+    /// Cache the raw (id-stripped) tools/list response body for a server.
+    pub async fn set_tools_list(&self, server_id: &uuid::Uuid, body: &[u8]) {
+        let key = Self::tools_list_key(server_id);
+        let _: Result<(), _> = self
+            .client
+            .set(&key, body, Some(Expiration::EX(TOOLS_LIST_CACHE_TTL_SECS)), None, false)
+            .await;
+    }
+
+    /// Invalidate the tools/list cache for a server (call on redeploy or image change).
+    pub async fn invalidate_tools_list(&self, server_id: &uuid::Uuid) {
+        let key = Self::tools_list_key(server_id);
+        let _: Result<(), _> = self.client.del(&key).await;
     }
 }
 

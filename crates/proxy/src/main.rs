@@ -21,12 +21,12 @@ use tokio::net::TcpListener;
 use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod affinity;
 mod auth;
 mod cache;
 mod code_mode;
 mod code_runner;
 mod embedding;
+mod fork_socket;
 mod mcp_transform;
 mod meta_tools;
 mod rate_limit;
@@ -35,6 +35,29 @@ mod redis_cache;
 use cache::{RequestCache, CoalesceResult};
 use mcp_db::{Tool, ToolRepository, UpsertTool};
 use redis_cache::{RedisCache, CachedServer, CodeExecContext};
+
+/// RAII guard that decrements the per-server active-request counter on drop.
+///
+/// Guarantees the decrement fires on ALL exit paths, including `?` unwinding
+/// (forward_request error, auth failure, etc.).  Without this guard the counter
+/// would drift upward on any error, causing every subsequent request to look
+/// concurrent and always fork — breaking the fork-vs-direct decision.
+struct ActiveRequestGuard<'a> {
+    map: &'a std::sync::Mutex<std::collections::HashMap<uuid::Uuid, usize>>,
+    server_id: uuid::Uuid,
+}
+
+impl<'a> Drop for ActiveRequestGuard<'a> {
+    fn drop(&mut self) {
+        let mut map = self.map.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(c) = map.get_mut(&self.server_id) {
+            *c = c.saturating_sub(1);
+            if *c == 0 {
+                map.remove(&self.server_id);
+            }
+        }
+    }
+}
 
 pub struct ProxyState {
     pub config: AppConfig,
@@ -65,6 +88,17 @@ pub struct ProxyState {
     pub builder_internal_url: Option<String>,
     /// Bearer token for authenticating to Builder internal API.
     pub builder_token: Option<String>,
+    /// In-process throttle for `last_request` Redis writes (60 s window).
+    /// Avoids a Redis SET on every single request; scale-to-zero only needs
+    /// minute-level precision, so one write per minute per server is enough.
+    pub last_request_throttle: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, std::time::Instant>>,
+    /// Per-server in-flight request counter for fork decisions.
+    /// Incremented when a request starts forwarding, decremented on completion.
+    pub active_requests: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, usize>>,
+    /// Path to the builder's Unix socket for fork VM lifecycle management.
+    /// When set, fork requests go through the socket (OS-guaranteed cleanup on crash).
+    /// When None, falls back to the HTTP kill-fork API.
+    pub fork_socket_path: Option<String>,
 }
 
 #[tokio::main]
@@ -126,7 +160,7 @@ async fn main() -> Result<()> {
     let upstream_timeout_secs: u64 = std::env::var("PROXY_UPSTREAM_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
+        .unwrap_or(620);
     let pool_idle_timeout_secs: u64 = std::env::var("PROXY_POOL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -146,7 +180,7 @@ async fn main() -> Result<()> {
     let sse_idle_timeout_secs: u64 = std::env::var("PROXY_SSE_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(120);
+        .unwrap_or(620);
     let sse_client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .read_timeout(std::time::Duration::from_secs(sse_idle_timeout_secs))
@@ -197,6 +231,13 @@ async fn main() -> Result<()> {
 
     let builder_internal_url = std::env::var("BUILDER_INTERNAL_URL").ok();
     let builder_token = std::env::var("BUILDER_TOKEN").ok();
+    let fork_socket_path = std::env::var("FORK_SOCKET_PATH").ok();
+
+    if fork_socket_path.is_some() {
+        tracing::info!("Fork socket mode enabled: {}", fork_socket_path.as_deref().unwrap_or(""));
+    } else {
+        tracing::info!("Fork socket mode disabled (FORK_SOCKET_PATH unset), using HTTP kill-fork fallback");
+    }
 
     let state = Arc::new(ProxyState {
         config: config.clone(),
@@ -213,6 +254,9 @@ async fn main() -> Result<()> {
         meta_tools,
         builder_internal_url,
         builder_token,
+        last_request_throttle: std::sync::Mutex::new(std::collections::HashMap::new()),
+        active_requests: std::sync::Mutex::new(std::collections::HashMap::new()),
+        fork_socket_path,
     });
 
     let app = Router::new()
@@ -391,8 +435,7 @@ async fn proxy_handler(
     let start = Instant::now();
 
     // Detect browser access and redirect to main site.
-    // OAuth paths (/authorize, /callback, /oauth/*) must pass through even from browsers
-    // because the OAuth flow opens these in the user's browser intentionally.
+    // OAuth paths (/authorize, /callback, /oauth/*) must pass through even from browsers.
     let path = uri.path();
     let is_oauth_path = path.starts_with("/authorize")
         || path.starts_with("/callback")
@@ -413,7 +456,8 @@ async fn proxy_handler(
 
     if is_browser {
         tracing::info!("Browser access detected, redirecting to main site");
-        let main_site_url = std::env::var("MAIN_SITE_URL").unwrap_or_else(|_| "https://nodeflare.tech".to_string());
+        let main_site_url = std::env::var("MAIN_SITE_URL")
+            .unwrap_or_else(|_| "https://nodeflare.tech".to_string());
         return Ok(Response::builder()
             .status(StatusCode::FOUND)
             .header(axum::http::header::LOCATION, main_site_url)
@@ -421,18 +465,15 @@ async fn proxy_handler(
             .unwrap());
     }
 
-    // Extract real client IP (handles reverse proxy headers when TRUST_PROXY_HEADERS=true)
     let client_ip = rate_limit::extract_client_ip(request.headers(), &addr);
+    tracing::info!(
+        "proxy_handler: host={}, uri={}, client_ip={}, base_domain={}",
+        host, uri, client_ip, state.config.server.proxy_base_domain
+    );
 
-    tracing::info!("proxy_handler: host={}, uri={}, client_ip={}, base_domain={}",
-        host, uri, client_ip, state.config.server.proxy_base_domain);
-
-    // 1. Extract server slug from subdomain
-    // e.g., "my-server.mcp.cloud" -> "my-server"
     let server_slug = extract_subdomain(&host, &state.config.server.proxy_base_domain)?;
     tracing::info!("proxy_handler: extracted slug={}", server_slug);
 
-    // Helper to add host to Unauthorized errors for proper WWW-Authenticate header
     let host_str = host.clone();
     let add_host_to_error = |e: ProxyError| -> ProxyError {
         match e {
@@ -441,14 +482,154 @@ async fn proxy_handler(
         }
     };
 
-    // 2. Resolve server first to check auth_enabled
     let server = resolve_server(&state, &server_slug).await?;
-    tracing::info!("proxy_handler: server resolved, id={}, auth_enabled={}", server.id, server.auth_enabled);
+    tracing::info!(
+        "proxy_handler: server resolved, id={}, auth_enabled={}",
+        server.id, server.auth_enabled
+    );
 
-    // 2b. Scale-to-zero: wake stopped containers before the status gate.
+    // For stopped servers: peek at the first 512B of POST bodies to detect MCP method.
+    // Lets us serve tools/list from Redis cache while waking the VM in the background —
+    // auth hits Redis/DB (not the VM), so we do it before the wake.
+    let (request, stopped_peek) =
+        if server.status == "stopped" && request.method() == axum::http::Method::POST {
+            let (parts, body) = request.into_parts();
+            let prefix = axum::body::to_bytes(body, 512).await.unwrap_or_default();
+            let mcp_method = serde_json::from_slice::<serde_json::Value>(&prefix)
+                .ok()
+                .and_then(|v| v.get("method").and_then(|m| m.as_str()).map(str::to_string));
+            (
+                Request::from_parts(parts, Body::from(prefix.clone())),
+                Some((prefix, mcp_method)),
+            )
+        } else {
+            (request, None)
+        };
+
+    // Auth — runs before scale-to-zero wake because credential validation uses
+    // Redis/DB only and does not require the upstream VM to be running.
+    let credential: Option<AuthCredential> = if server.auth_enabled {
+        let api_key = auth::extract_api_key(&request).map_err(|e| add_host_to_error(e))?;
+        tracing::debug!(
+            "proxy_handler: API key extracted (prefix={}...)",
+            &api_key[..api_key.len().min(8)]
+        );
+        let credential = auth::validate_credential(&state, &api_key, &client_ip)
+            .await
+            .map_err(|e| add_host_to_error(e))?;
+        tracing::info!("proxy_handler: credential validated (took {:?})", start.elapsed());
+        authorize_credential_for_server(&state, &credential, &server).await?;
+        tracing::debug!("proxy_handler: checking rate limit");
+        match rate_limit::check(&state, credential.id(), &server).await {
+            Ok(_) => tracing::debug!("proxy_handler: rate limit check passed"),
+            Err(ProxyError::RateLimitExceeded) => return Err(ProxyError::RateLimitExceeded),
+            Err(e) => tracing::warn!("proxy_handler: rate limit check failed (continuing): {}", e),
+        }
+        Some(credential)
+    } else {
+        let path = uri.path();
+        if path == "/register" || path.ends_with("/register") {
+            tracing::info!(
+                "proxy_handler: auth disabled, rejecting /register for server {}",
+                server.id
+            );
+            return Ok(StatusCode::NOT_FOUND.into_response());
+        }
+        tracing::info!(
+            "proxy_handler: auth disabled for server {}, skipping credential validation",
+            server.id
+        );
+        None
+    };
+
+    // Monthly quota.
+    tracing::debug!("proxy_handler: checking monthly quota");
+    match rate_limit::check_and_increment_monthly_quota(&state, server.workspace_id).await {
+        Ok(_) => tracing::debug!("proxy_handler: monthly quota check passed"),
+        Err(e @ ProxyError::QuotaExceeded(_)) => return Err(e),
+        Err(e @ ProxyError::PaymentRequired(_)) => return Err(e),
+        Err(e @ ProxyError::RateLimitExceeded) => return Err(e),
+        Err(e) => tracing::warn!("proxy_handler: monthly quota check failed (continuing): {}", e),
+    }
+
+    // Scale-to-zero wake.
     if server.status == "stopped" {
         if let (Some(builder_url), Some(token)) = (&state.builder_internal_url, &state.builder_token) {
-            tracing::info!("proxy_handler: waking stopped server {} (container={})", server.id, server.container_name);
+            // Predictive wake: if this is tools/list and we have a Redis-cached response,
+            // return it instantly and wake the VM in the background. By the time the AI
+            // sends the first tools/call (5–30 s of AI think time), the VM is ready.
+            if let Some((ref peek_bytes, Some(ref method))) = stopped_peek {
+                if method == "tools/list" {
+                    if let Some(cached) = state.redis_cache.get_tools_list(&server.id).await {
+                        tracing::info!(
+                            "predictive-wake[{}]: tools/list cache HIT — bg wake, instant response",
+                            server.container_name
+                        );
+                        let bg_url = format!("{}/internal/start/{}", builder_url, server.container_name);
+                        let bg_token = token.clone();
+                        let bg_client = state.http_client.clone();
+                        let bg_slug = server_slug.clone();
+                        let bg_redis = state.redis_cache.clone();
+                        tokio::spawn(async move {
+                            let _ = bg_client.post(&bg_url).bearer_auth(&bg_token).send().await;
+                            bg_redis.invalidate_server(&bg_slug).await;
+                        });
+
+                        let mcp_info = extract_mcp_request_info(peek_bytes);
+                        let default_headers =
+                            vec![("content-type".to_string(), "application/json".to_string())];
+                        let fwd = ForwardContext {
+                            auth_enabled: server.auth_enabled,
+                            client_ip: &client_ip,
+                            host: &host,
+                            server_id: server.id,
+                            filter_by_scope: server.tool_list_filter_by_scope,
+                            slim: server.tool_schema_slim,
+                            search_mode: server.tool_search_mode,
+                            code_mode: server.tool_code_mode,
+                        };
+                        let body = inject_jsonrpc_id(&cached, mcp_info.id.as_ref());
+                        let body = transform_list_body(
+                            &mcp_info,
+                            &default_headers,
+                            body,
+                            credential.as_ref(),
+                            &fwd,
+                            &state.meta_tools,
+                        );
+                        let duration_ms = start.elapsed().as_millis() as i32;
+                        let server_id = server.id;
+                        let api_key_id = credential.as_ref().map(|c| c.id());
+                        let db = state.db.clone();
+                        tokio::spawn(async move {
+                            let _ = mcp_db::RequestLogRepository::create(
+                                &db,
+                                mcp_db::CreateRequestLog {
+                                    server_id,
+                                    tool_name: None,
+                                    api_key_id,
+                                    client_info: None,
+                                    request_body: None,
+                                    response_status: "success".to_string(),
+                                    error_message: None,
+                                    duration_ms,
+                                },
+                            )
+                            .await;
+                        });
+                        return Ok(build_response(200, &default_headers, body)?);
+                    }
+                }
+            }
+
+            // Cache miss or non-tools/list: wake normally.
+            // builder's /internal/start blocks until wait_for_port succeeds, so the
+            // 200 response means the VM is already accepting connections — no TCP
+            // polling needed on this side.
+            tracing::info!(
+                "proxy_handler: waking stopped server {} (container={})",
+                server.id, server.container_name
+            );
             let wake_url = format!("{}/internal/start/{}", builder_url, server.container_name);
             let wake_result = state.http_client
                 .post(&wake_url)
@@ -457,26 +638,11 @@ async fn proxy_handler(
                 .await;
             match wake_result {
                 Ok(r) if r.status().is_success() => {
-                    tracing::info!("proxy_handler: wake request accepted for {}", server.container_name);
-                    // Invalidate cache so next resolve picks up running status
+                    tracing::info!(
+                        "proxy_handler: VM {} is up (builder confirmed ready)",
+                        server.container_name
+                    );
                     state.redis_cache.invalidate_server(&server_slug).await;
-                    // Wait up to 30s for container port to respond
-                    if let Some(endpoint) = &server.endpoint_url {
-                        let port = endpoint.trim_start_matches("http://127.0.0.1:");
-                        let addr = format!("127.0.0.1:{}", port);
-                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-                        loop {
-                            if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                                tracing::info!("proxy_handler: container {} is up", server.container_name);
-                                break;
-                            }
-                            if std::time::Instant::now() >= deadline {
-                                tracing::warn!("proxy_handler: container {} did not come up in 30s", server.container_name);
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        }
-                    }
                 }
                 Ok(r) => tracing::warn!("proxy_handler: wake returned {}", r.status()),
                 Err(e) => tracing::warn!("proxy_handler: wake failed: {}", e),
@@ -484,103 +650,183 @@ async fn proxy_handler(
         }
     }
 
-    // Record last_request timestamp for scale-to-zero idle detection (fire-and-forget)
+    // Record last_request timestamp for scale-to-zero idle detection.
+    // Throttled to one Redis write per 60 s per server — the scaler only needs
+    // minute-level precision (idle threshold is 5 min by default).
     {
-        let redis = state.redis.clone();
-        let server_id = server.id.to_string();
-        tokio::spawn(async move {
-            let key = format!("last_request:{}", server_id);
-            let _: Result<(), _> = fred::prelude::KeysInterface::set(
-                &redis,
-                &key,
-                chrono::Utc::now().timestamp(),
-                Some(fred::types::Expiration::EX(600)),
-                None,
-                false,
-            ).await;
-        });
+        const THROTTLE: std::time::Duration = std::time::Duration::from_secs(60);
+        let should_write = {
+            let mut map = state
+                .last_request_throttle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let now = std::time::Instant::now();
+            match map.get(&server.id) {
+                Some(t) if t.elapsed() < THROTTLE => false,
+                _ => {
+                    map.insert(server.id, now);
+                    true
+                }
+            }
+        };
+        if should_write {
+            let redis = state.redis.clone();
+            let server_id = server.id.to_string();
+            tokio::spawn(async move {
+                let key = format!("last_request:{}", server_id);
+                let _: Result<(), _> = fred::prelude::KeysInterface::set(
+                    &redis,
+                    &key,
+                    chrono::Utc::now().timestamp(),
+                    Some(fred::types::Expiration::EX(600)),
+                    None,
+                    false,
+                )
+                .await;
+            });
+        }
     }
 
-    // 2c. Status gate: reject servers that are not running (building/failed/deleting).
-    // Note: stopped servers are handled above (wake-up flow), so by this point they are
-    // either running or timed out (we fall through and let the upstream fail naturally).
+    // Status gate: reject servers that are not running (building/failed/deleting).
     if server.status != "running" && server.status != "stopped" {
-        tracing::warn!("proxy_handler: server {} not serveable (status={})", server.id, server.status);
+        tracing::warn!(
+            "proxy_handler: server {} not serveable (status={})",
+            server.id, server.status
+        );
         return Err(ProxyError::ServiceUnavailable(format!(
             "Server is not running (status: {})",
             server.status
         )));
     }
 
-    // 3. Handle auth based on server.auth_enabled setting
-    let credential: Option<AuthCredential> = if server.auth_enabled {
-        // Auth enabled: Extract and validate API key
-        let api_key = auth::extract_api_key(&request).map_err(|e| add_host_to_error(e))?;
-        tracing::debug!("proxy_handler: API key extracted (prefix={}...)", &api_key[..api_key.len().min(8)]);
+    let endpoint_url = server.endpoint_url.as_ref().ok_or_else(|| {
+        tracing::error!(
+            "proxy_handler: server {} has no endpoint_url (not deployed)",
+            server.id
+        );
+        ProxyError::ServiceUnavailable("Server not deployed".into())
+    })?;
 
-        let credential = auth::validate_credential(&state, &api_key, &client_ip)
-            .await
-            .map_err(|e| add_host_to_error(e))?;
-        tracing::info!("proxy_handler: credential validated successfully (took {:?})", start.elapsed());
-
-        // Verify the credential is authorized for THIS server / workspace (tenant
-        // isolation). Must run before forwarding — the target server is chosen purely
-        // from the caller-supplied host label, so without this an authenticated
-        // credential from any tenant could reach any other tenant's server.
-        authorize_credential_for_server(&state, &credential, &server).await?;
-
-        // Check rate limit (per-minute) - graceful degradation on Redis errors
-        tracing::debug!("proxy_handler: checking rate limit");
-        match rate_limit::check(&state, credential.id(), &server).await {
-            Ok(_) => tracing::debug!("proxy_handler: rate limit check passed"),
-            Err(ProxyError::RateLimitExceeded) => return Err(ProxyError::RateLimitExceeded),
-            Err(e) => tracing::warn!("proxy_handler: rate limit check failed (continuing anyway): {}", e),
-        }
-
-        Some(credential)
-    } else {
-        // Auth disabled: Skip credential validation.
-        // Reject OAuth DCR requests (/register) — they make no sense without auth and
-        // confuse MCP clients into thinking OAuth is required when it isn't.
-        let path = uri.path();
-        if path == "/register" || path.ends_with("/register") {
-            tracing::info!("proxy_handler: auth disabled, rejecting /register for server {}", server.id);
-            return Ok(StatusCode::NOT_FOUND.into_response());
-        }
-        tracing::info!("proxy_handler: auth disabled for server {}, skipping credential validation", server.id);
-        None
-    };
-
-    // 4. Atomically check + increment the monthly quota before forwarding.
-    // (This applies regardless of auth_enabled to prevent abuse.) Incrementing
-    // inline avoids the previous check-then-fire-and-forget TOCTOU; on a hard
-    // (non-quota) error we fail open but log.
-    tracing::debug!("proxy_handler: checking monthly quota");
-    match rate_limit::check_and_increment_monthly_quota(&state, server.workspace_id).await {
-        Ok(_) => tracing::debug!("proxy_handler: monthly quota check passed"),
-        Err(e @ ProxyError::QuotaExceeded(_)) => return Err(e),
-        Err(e @ ProxyError::PaymentRequired(_)) => return Err(e),
-        Err(e @ ProxyError::RateLimitExceeded) => return Err(e),
-        Err(e) => tracing::warn!("proxy_handler: monthly quota check failed (continuing anyway): {}", e),
-    }
-
-    // 5. Forward request to MCP server
-    let endpoint_url = server
-        .endpoint_url
-        .as_ref()
-        .ok_or_else(|| {
-            tracing::error!("proxy_handler: server {} has no endpoint_url (not deployed)", server.id);
-            ProxyError::ServiceUnavailable("Server not deployed".into())
-        })?;
-
-    // Use server's mcp_path (e.g., "/mcp", "/api", "/sse") - configurable per server
     let mcp_path = server.mcp_path.trim_start_matches('/');
     let query = uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
-    let target_url = format!("{}/{}{}", endpoint_url.trim_end_matches('/'), mcp_path, query);
+
+    // VM fork: if there is already an in-flight request for this server and a
+    // snapshot is available, spin up a fresh fork VM so concurrent requests
+    // run in parallel rather than queuing behind each other.
+    //
+    // Two cleanup modes (selected by FORK_SOCKET_PATH env var):
+    //   Socket mode: ForkLease / VmLease hold connections open; dropping them
+    //     signals the builder (kill fork / decrement active count).  Guaranteed
+    //     to fire even on proxy crash (kernel closes all fds on process exit).
+    //   HTTP fallback: explicit POST /internal/kill-fork after the request
+    //     completes.  Best-effort — orphans if the proxy crashes mid-request.
+    let base_url = format!("{}/{}{}", endpoint_url.trim_end_matches('/'), mcp_path, query);
+
+    // Increment the active-request counter and install a Drop guard so it is
+    // ALWAYS decremented — even if forward_request returns an error or any
+    // other ? unwinds the stack.  Previously the decrement was done manually
+    // after forward_request, which was silently skipped on error paths.
+    let concurrent = {
+        let mut map = state.active_requests.lock().unwrap_or_else(|p| p.into_inner());
+        let count = map.entry(server.id).or_insert(0);
+        *count += 1;
+        *count > 1
+    };
+    let _active_guard = ActiveRequestGuard {
+        map: &state.active_requests,
+        server_id: server.id,
+    };
+
+    let snapshot_ready = {
+        let snap_base = std::path::PathBuf::from("/opt/firecracker/snapshots")
+            .join(&server.container_name);
+        snap_base.join("snapshot.bin").exists() && snap_base.join("memory.bin").exists()
+    };
+
+    // VmLease: held while this request is in flight.  The builder's scale-to-zero
+    // scaler skips any container whose lease count > 0, preventing two races:
+    //   1. Snapshotting a VM mid-request (kills the active connection).
+    //   2. Overwriting snapshot files while a concurrent fork is restoring from them.
+    // Best-effort: if the socket is unavailable we log and continue without a lease.
+    let _vm_lease: Option<fork_socket::VmLease> =
+        if let Some(socket_path) = state.fork_socket_path.as_deref() {
+            match fork_socket::hold_vm(socket_path, &server.container_name).await {
+                Ok(lease) => Some(lease),
+                Err(e) => {
+                    tracing::warn!(
+                        "proxy_handler: vm_lease unavailable for {}, scale-to-zero may race: {}",
+                        server.container_name, e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+    // fork_lease: held until end of handler; dropping it sends EOF to builder → kill_fork.
+    // http_fork_info: used by the HTTP fallback path for the explicit kill-fork call.
+    let mut fork_lease: Option<fork_socket::ForkLease> = None;
+    let mut http_fork_info: Option<(String, String)> = None;
+
+    let target_url: String = if concurrent && snapshot_ready {
+        if let Some(socket_path) = state.fork_socket_path.as_deref() {
+            // Socket mode: request fork and hold the lease alive.
+            match fork_socket::request_fork(socket_path, &server.container_name).await {
+                Ok(lease) => {
+                    let fork_url = format!("http://127.0.0.1:{}/{}{}", lease.port, mcp_path, query);
+                    tracing::info!(
+                        "proxy_handler: forked {} → {} on port {} (socket)",
+                        server.container_name, lease.fork_name, lease.port
+                    );
+                    fork_lease = Some(lease);
+                    fork_url
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "proxy_handler: fork socket failed for {}, falling back to base VM: {}",
+                        server.container_name, e
+                    );
+                    base_url.clone()
+                }
+            }
+        } else if let (Some(builder_url), Some(token)) = (
+            state.builder_internal_url.as_deref(),
+            state.builder_token.as_deref(),
+        ) {
+            // HTTP fallback mode: call builder fork endpoint.
+            let fork_url = format!("{}/internal/fork/{}", builder_url, server.container_name);
+            match state.http_client.post(&fork_url).bearer_auth(token).send().await {
+                Ok(r) if r.status().is_success() => {
+                    if let Ok(body) = r.json::<serde_json::Value>().await {
+                        let port = body["port"].as_u64();
+                        let fork_name = body["fork_container"].as_str().map(|s| s.to_string());
+                        let base_name = body["base_container"].as_str().map(|s| s.to_string());
+                        if let (Some(p), Some(name), Some(base)) = (port, fork_name, base_name) {
+                            tracing::info!(
+                                "proxy_handler: forked {} → {} on port {} (http)",
+                                server.container_name, name, p
+                            );
+                            http_fork_info = Some((base, name));
+                            format!("http://127.0.0.1:{}/{}{}", p, mcp_path, query)
+                        } else {
+                            base_url.clone()
+                        }
+                    } else {
+                        base_url.clone()
+                    }
+                }
+                _ => base_url.clone(),
+            }
+        } else {
+            base_url.clone()
+        }
+    } else {
+        base_url.clone()
+    };
+
     tracing::info!("proxy_handler: forwarding request to {}", target_url);
 
-    // 6. Forward request. Scope checks only apply when NodeFlare auth is enabled
-    // (credential present); otherwise the upstream handles its own auth.
     let fwd = ForwardContext {
         auth_enabled: server.auth_enabled,
         client_ip: &client_ip,
@@ -595,17 +841,36 @@ async fn proxy_handler(
         forward_request(&state, &target_url, request, credential.as_ref(), &fwd).await?;
     tracing::info!("proxy_handler: request forwarded, status={}", response.status());
 
-    // 7. Monthly quota is already incremented atomically in step 4 (before forwarding).
+    // _active_guard drops here (or on any error path above), decrementing the counter.
+    // _vm_lease drops here, decrementing the base VM's active count in the builder.
+    // Both are guaranteed to run on all exit paths via RAII Drop impls.
+    drop(_active_guard);
+    drop(_vm_lease);
 
-    // 8. Log request (async, don't block)
+    // Socket mode: fork_lease drops here, sending SHUT_WR → builder kills the fork VM.
+    // This is OS-guaranteed: even if we never reach this point (e.g. `?` unwound above),
+    // the lease will have already been dropped by the stack unwind, so cleanup fires.
+    drop(fork_lease);
+
+    // HTTP fallback mode: explicit kill-fork POST.
+    if let Some((base_name, fork_name)) = http_fork_info {
+        if let (Some(builder_url), Some(token)) = (
+            state.builder_internal_url.as_deref(),
+            state.builder_token.as_deref(),
+        ) {
+            let kill_url = format!("{}/internal/kill-fork/{}/{}", builder_url, base_name, fork_name);
+            let client = state.http_client.clone();
+            let token = token.to_string();
+            tokio::spawn(async move {
+                let _ = client.post(&kill_url).bearer_auth(token).send().await;
+            });
+        }
+    }
+
     let duration_ms = start.elapsed().as_millis() as i32;
     let server_id = server.id;
     let api_key_id = credential.as_ref().map(|c| c.id());
-    let status = if response.status().is_success() {
-        "success"
-    } else {
-        "error"
-    };
+    let status = if response.status().is_success() { "success" } else { "error" };
     let tool_name = mcp_info.target.clone();
 
     let db = state.db.clone();
@@ -1116,16 +1381,6 @@ async fn forward_request(
         }
     }
 
-    // Session affinity: pin a stateful session to the Fly Machine that owns it.
-    let is_initialize = mcp_info.method_str.as_deref() == Some("initialize");
-    let affinity = affinity::decide(state, target_url, &headers, is_initialize).await;
-    if let Some(machine) = affinity.forced_machine.as_deref() {
-        if let Ok(value) = HeaderValue::from_str(machine) {
-            headers.insert("fly-force-instance-id", value);
-            tracing::info!("affinity: forcing instance {}", machine);
-        }
-    }
-
     // tools/list gets token-reduction transforms (scope filter + optional slim) and
     // populates the server's tool catalog, so it must be buffered rather than streamed.
     let is_tools_list = matches!(mcp_info.method, McpMethod::ToolsList);
@@ -1136,11 +1391,6 @@ async fn forward_request(
     if is_sse && !is_tools_list {
         tracing::info!("SSE request detected, using streaming forward to {}", target_url);
         let response = execute_streaming_request(state, target_url, method, &headers, body_bytes).await?;
-        let session_id = response
-            .headers()
-            .get("mcp-session-id")
-            .and_then(|v| v.to_str().ok());
-        affinity::capture_session(state, &affinity, session_id).await;
         return Ok((response, mcp_info));
     }
 
@@ -1151,6 +1401,11 @@ async fn forward_request(
             execute_upstream_request(state, target_url, method, &headers, body_bytes).await?;
         if status >= 200 && status < 300 {
             spawn_catalog_update(state, fwd.server_id, &response_headers, &response_body);
+            // Persist to Redis for predictive wake (id-stripped so any caller can use it).
+            let stripped = strip_jsonrpc_id(&response_body);
+            let rc = state.redis_cache.clone();
+            let sid = fwd.server_id;
+            tokio::spawn(async move { rc.set_tools_list(&sid, &stripped).await; });
         }
         let body = transform_list_body(&mcp_info, &response_headers, response_body, credential, fwd, &state.meta_tools);
         let response = build_response(status, &response_headers, body)?;
@@ -1195,6 +1450,11 @@ async fn forward_request(
                         if status >= 200 && status < 300 {
                             spawn_catalog_update(state, fwd.server_id, &response_headers, &response_body);
                             let cacheable = strip_jsonrpc_id(&response_body);
+                            // Persist to Redis for predictive wake (survives proxy restarts).
+                            let rc = state.redis_cache.clone();
+                            let sid = fwd.server_id;
+                            let redis_body = cacheable.clone();
+                            tokio::spawn(async move { rc.set_tools_list(&sid, &redis_body).await; });
                             state.request_cache.complete(handle, cacheable, status, response_headers.clone()).await;
                         } else {
                             state.request_cache.cancel(handle).await;
@@ -1216,12 +1476,6 @@ async fn forward_request(
     // Non-cacheable requests: execute directly
     let (response_body, status, response_headers) =
         execute_upstream_request(state, target_url, method, &headers, body_bytes).await?;
-
-    let session_id = response_headers
-        .iter()
-        .find(|(k, _)| k == "mcp-session-id")
-        .map(|(_, v)| v.as_str());
-    affinity::capture_session(state, &affinity, session_id).await;
 
     let response = build_response(status, &response_headers, response_body)?;
     Ok((response, mcp_info))
@@ -1362,20 +1616,46 @@ async fn run_code_response(
         max_tool_calls: runner.max_tool_calls(),
     };
     let started = Instant::now();
-    match runner.run(req).await {
-        Ok(output) => {
-            tracing::info!(
-                "run_code: success ({} bytes) in {:?}",
-                output.len(),
-                started.elapsed()
-            );
-            respond(code_mode::result_json(&output, id))
+    let id_owned = id.cloned();
+    let runner = runner.clone();
+
+    // Stream SSE keepalives while the runner executes, so the client does not
+    // time out waiting for a long-running tool (e.g. nuclei full scan).
+    let stream = async_stream::stream! {
+        let run_fut = runner.run(req);
+        tokio::pin!(run_fut);
+        let mut keepalive = tokio::time::interval(std::time::Duration::from_secs(15));
+        keepalive.tick().await; // consume the immediate first tick
+        loop {
+            tokio::select! {
+                result = &mut run_fut => {
+                    let payload = match result {
+                        Ok(output) => {
+                            tracing::info!("run_code: success ({} bytes) in {:?}", output.len(), started.elapsed());
+                            code_mode::result_json(&output, id_owned.as_ref())
+                        }
+                        Err(e) => {
+                            tracing::warn!("run_code: FAILED in {:?}: {}", started.elapsed(), e);
+                            code_mode::error_json(&format!("code execution failed: {e}"), id_owned.as_ref())
+                        }
+                    };
+                    let line = format!("event: message\ndata: {}\n\n",
+                        String::from_utf8_lossy(&payload));
+                    yield Ok::<_, std::convert::Infallible>(Bytes::from(line));
+                    break;
+                }
+                _ = keepalive.tick() => {
+                    yield Ok::<_, std::convert::Infallible>(Bytes::from_static(b": keepalive\n\n"));
+                }
+            }
         }
-        Err(e) => {
-            tracing::warn!("run_code: FAILED in {:?}: {}", started.elapsed(), e);
-            respond(code_mode::error_json(&format!("code execution failed: {e}"), id))
-        }
-    }
+    };
+    Response::builder()
+        .status(200)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| Response::builder().status(500).body(Body::empty()).unwrap())
 }
 
 /// Internal endpoint the sandbox calls to invoke a tool (the security boundary).

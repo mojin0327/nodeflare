@@ -54,7 +54,7 @@ impl CodeRunnerClient {
         let timeout_secs = std::env::var("PROXY_CODE_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(15);
+            .unwrap_or(600);
         let max_tool_calls = std::env::var("PROXY_CODE_MAX_TOOL_CALLS")
             .ok()
             .and_then(|s| s.parse().ok())

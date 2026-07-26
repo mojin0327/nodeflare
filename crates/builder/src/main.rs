@@ -15,6 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod containerd;
 mod firecracker;
 mod flyctl;
+mod fork_socket;
 mod tap;
 
 #[allow(dead_code)]
@@ -410,6 +411,26 @@ async fn run_orphan_destroy_sweeper(ctx: Arc<BuilderContext>) {
     }
 }
 
+/// Background sweeper for stale Firecracker artefacts: snapshot directories,
+/// rootfs/marker files, and dead socket files whose container no longer exists
+/// in the DB. Runs once at startup (to reconcile after a restart or crash) and
+/// then every 10 minutes.
+async fn run_stale_resource_sweeper(db: mcp_db::DbPool) {
+    let mut interval =
+        tokio::time::interval(std::time::Duration::from_secs(ORPHAN_SWEEPER_INTERVAL_SECS));
+    loop {
+        interval.tick().await;
+        match ServerRepository::list_all_container_names(&db).await {
+            Ok(known) => {
+                firecracker::cleanup_stale_resources(&known).await;
+            }
+            Err(e) => {
+                tracing::error!("stale-resource sweeper: failed to list container names: {}", e);
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // musl builds require explicit CryptoProvider selection
@@ -610,8 +631,12 @@ async fn main() -> Result<()> {
         }))
         .route("/internal/start/:container", post({
             let tok = builder_token.clone();
+            let db = context.db.clone();
+            let crypto = context.crypto.clone();
             move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
                 let tok = tok.clone();
+                let db = db.clone();
+                let crypto = crypto.clone();
                 async move {
                     if !tok.is_empty() {
                         let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
@@ -623,13 +648,114 @@ async fn main() -> Result<()> {
                     match firecracker::restore(&container).await {
                         Ok(_port) => {
                             tracing::info!("scale-to-zero: restored VM {} from snapshot", container);
+                            if let Err(e) = ServerRepository::update_status_by_container_name(
+                                &db,
+                                &container,
+                                mcp_common::types::ServerStatus::Running,
+                            ).await {
+                                tracing::warn!("scale-to-zero: failed to update status for {}: {}", container, e);
+                            }
                             (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"started": container})))
                         }
+                        Err(restore_err) => {
+                            tracing::warn!("scale-to-zero: restore of {} failed ({}), attempting fresh boot", container, restore_err);
+                            // Read image name from marker file (written by extract_rootfs)
+                            let marker_path = format!("/opt/firecracker/rootfs/{}.marker", container);
+                            let image = match tokio::fs::read_to_string(&marker_path).await {
+                                Ok(content) => content.lines().next().unwrap_or("").trim().to_string(),
+                                Err(e) => {
+                                    tracing::warn!("scale-to-zero: no marker for {}: {}", container, e);
+                                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": format!("no snapshot and no marker for {}", container)})));
+                                }
+                            };
+                            if image.is_empty() {
+                                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "empty image name in marker"})));
+                            }
+                            let server = match ServerRepository::find_by_container_name(&db, &container).await {
+                                Ok(Some(s)) => s,
+                                Ok(None) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "server not found"}))),
+                                Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()}))),
+                            };
+                            let encrypted_secrets = SecretRepository::list_by_server(&db, server.id).await.unwrap_or_default();
+                            let host_port = containerd::derive_host_port(&container);
+                            let mut env_pairs: Vec<(String, String)> = vec![("PORT".to_string(), host_port.to_string())];
+                            for secret in encrypted_secrets {
+                                if let Ok(bytes) = crypto.decrypt(&secret.encrypted_value, &secret.nonce) {
+                                    if let Ok(value) = String::from_utf8(bytes) {
+                                        env_pairs.push((secret.key, value));
+                                    }
+                                }
+                            }
+                            let memory_mb = server.memory_mb.unwrap_or(256) as u64;
+                            match firecracker::boot(&container, &image, memory_mb, &env_pairs).await {
+                                Ok(_) => {
+                                    tracing::info!("scale-to-zero: fresh-booted VM {} from image {}", container, image);
+                                    if let Err(e) = ServerRepository::update_status_by_container_name(
+                                        &db,
+                                        &container,
+                                        mcp_common::types::ServerStatus::Running,
+                                    ).await {
+                                        tracing::warn!("scale-to-zero: failed to update status for {}: {}", container, e);
+                                    }
+                                    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"started": container})))
+                                }
+                                Err(e) => {
+                                    tracing::warn!("scale-to-zero: fresh boot of {} failed: {}", container, e);
+                                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()})))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .route("/internal/fork/:container", post({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    let base = path.0;
+                    // Derive a unique fork name from the base + nanosecond timestamp
+                    let ns = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.subsec_nanos())
+                        .unwrap_or(0);
+                    let prefix = &base[..base.len().min(28)];
+                    let fork = format!("{}-f{}", prefix, ns);
+                    match firecracker::restore_fork(&base, &fork).await {
+                        Ok(port) => (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
+                            "fork_container": fork,
+                            "base_container": base,
+                            "port": port,
+                        }))),
                         Err(e) => {
-                            tracing::warn!("scale-to-zero: restore of {} failed: {}", container, e);
+                            tracing::warn!("fork of {} failed: {}", base, e);
                             (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": e.to_string()})))
                         }
                     }
+                }
+            }
+        }))
+        .route("/internal/kill-fork/:base/:fork", post({
+            let tok = builder_token.clone();
+            move |headers: axum::http::HeaderMap, path: axum::extract::Path<(String, String)>| {
+                let tok = tok.clone();
+                async move {
+                    if !tok.is_empty() {
+                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                        if auth != Some(&format!("Bearer {}", tok)) {
+                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
+                        }
+                    }
+                    let (base, fork) = path.0;
+                    firecracker::kill_fork(&fork, &base).await;
+                    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"killed": fork})))
                 }
             }
         }));
@@ -643,8 +769,18 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Scale-to-zero scaler: stop idle containers every 5 minutes
-    tokio::spawn(run_scale_to_zero_scaler(context.db.clone(), config.redis.url.clone()));
+    // Shared active-request counter per base container.
+    // The fork socket server increments it on each lease (fork or hold);
+    // the scale-to-zero scaler checks it before snapshotting.
+    let active_map = fork_socket::new_active_map();
+
+    // Scale-to-zero scaler: stop idle containers every 5 minutes.
+    // Passes the active_map so it can skip VMs with in-flight requests.
+    tokio::spawn(run_scale_to_zero_scaler(
+        context.db.clone(),
+        config.redis.url.clone(),
+        active_map.clone(),
+    ));
 
     // Reconcile-on-startup + periodic reaper for deployments stuck in a non-terminal
     // state (worker died mid-build, OOM, etc.) so they don't show "Building" forever.
@@ -654,6 +790,21 @@ async fn main() -> Result<()> {
     // app teardown never confirmed (worker crash, dropped job, exhausted retries) so we
     // don't leak orphaned, billable apps.
     tokio::spawn(run_orphan_destroy_sweeper(context.clone()));
+
+    // Stale Firecracker resource sweeper: removes snapshot dirs, rootfs files, and
+    // dead socket files that belong to containers no longer in the DB.
+    tokio::spawn(run_stale_resource_sweeper(context.db.clone()));
+
+    // Fork VM Unix socket server: manages fork VM lifecycle and base VM active leases.
+    // Connections held open protect VMs from scale-to-zero; dropping triggers cleanup.
+    if let Ok(socket_path) = std::env::var("FORK_SOCKET_PATH") {
+        let path = socket_path.clone();
+        let am = active_map.clone();
+        tokio::spawn(async move {
+            fork_socket::run(&path, am).await;
+        });
+        tracing::info!("Fork socket server will start on {}", socket_path);
+    }
 
     tracing::info!("Starting job queue workers (poll interval: 30s)...");
 
@@ -1842,7 +1993,11 @@ async fn handle_destroy_job(job: DestroyJob, ctx: Data<Arc<BuilderContext>>) -> 
 
 /// Scale-to-zero scaler: every 5 minutes, stop containers that have had no
 /// requests for more than 5 minutes (Redis key `last_request:{server_id}` absent or expired).
-async fn run_scale_to_zero_scaler(db: mcp_db::DbPool, redis_url: String) {
+async fn run_scale_to_zero_scaler(
+    db: mcp_db::DbPool,
+    redis_url: String,
+    active: fork_socket::ActiveMap,
+) {
     let idle_threshold_secs: u64 = std::env::var("SCALE_TO_ZERO_IDLE_SECS")
         .ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     let check_interval_secs: u64 = std::env::var("SCALE_TO_ZERO_CHECK_SECS")
@@ -1902,6 +2057,16 @@ async fn run_scale_to_zero_scaler(db: mcp_db::DbPool, redis_url: String) {
                 tracing::debug!("scale-to-zero: no VM socket for {} — skipping", server.container_name);
                 continue;
             }
+
+            // Skip VMs with active proxy connections (VmLease or ForkLease held).
+            // This prevents snapshotting a VM mid-request, and prevents overwriting
+            // snapshot files while a fork is being restored from them.
+            let n = fork_socket::active_count(&active, &server.container_name);
+            if n > 0 {
+                tracing::debug!("scale-to-zero: {} has {} active connection(s), skipping", server.container_name, n);
+                continue;
+            }
+
 
             tracing::info!("scale-to-zero: snapshotting idle VM {} (server={})", server.container_name, server.id);
 

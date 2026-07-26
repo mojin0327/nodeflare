@@ -70,7 +70,7 @@ impl ServerRepository {
             &format!(
                 "SELECT {SERVER_COLS_S} FROM mcp_servers s \
                  JOIN workspaces w ON w.id = s.workspace_id \
-                 WHERE w.slug = $1 AND s.slug = $2 AND s.status = 'running'"
+                 WHERE w.slug = $1 AND s.slug = $2 AND s.status IN ('running', 'stopped')"
             ),
         )
         .bind(workspace_slug)
@@ -324,6 +324,35 @@ impl ServerRepository {
         Ok(())
     }
 
+    pub async fn find_by_container_name(
+        pool: &PgPool,
+        container_name: &str,
+    ) -> Result<Option<McpServer>> {
+        let server = sqlx::query_as::<_, McpServer>(
+            &format!("SELECT {SERVER_COLS} FROM mcp_servers WHERE container_name = $1"),
+        )
+        .bind(container_name)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(server)
+    }
+
+    pub async fn update_status_by_container_name(
+        pool: &PgPool,
+        container_name: &str,
+        status: ServerStatus,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE mcp_servers SET status = $2, updated_at = NOW() WHERE container_name = $1"
+        )
+        .bind(container_name)
+        .bind(status.to_string())
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     /// List all servers for a user across all workspaces (prevents N+1)
     /// Note: For users with many servers, use list_all_by_user_paginated instead
     pub async fn list_all_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<McpServer>> {
@@ -420,6 +449,19 @@ impl ServerRepository {
             total_workspaces: row.2,
         })
     }
+
+    /// All container_name values across every server (any status).
+    /// Used by the Firecracker stale-resource sweeper to identify orphans.
+    pub async fn list_all_container_names(pool: &PgPool) -> Result<std::collections::HashSet<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT container_name FROM mcp_servers \
+             WHERE container_name IS NOT NULL AND container_name != ''"
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(rows.into_iter().map(|(c,)| c).collect())
+    }
+
 
     /// List running servers that have an upstream OAuth provider configured.
     /// Used by the background token refresh job.

@@ -30,7 +30,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::containerd::derive_host_port;
-use crate::tap::TapDevice;
+use crate::tap::{ForkNetns, TapDevice};
 
 const KERNEL_PATH: &str = "/opt/firecracker/kernels/vmlinux-5.10";
 const ROOTFS_DIR: &str = "/opt/firecracker/rootfs";
@@ -95,26 +95,44 @@ pub async fn snapshot(container_name: &str) -> Result<()> {
     let snap_path = snap_dir.join("snapshot.bin");
     let mem_path = snap_dir.join("memory.bin");
 
-    // Pause must complete within a bounded time to avoid hanging the scaler.
-    timeout(
-        Duration::from_secs(API_CALL_TIMEOUT_SECS),
-        api_patch(&socket, "/vm", &json!({"state": "Paused"})),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("pause timed out after {}s", API_CALL_TIMEOUT_SECS))?
-    .context("failed to pause VM for snapshot")?;
+    let result: Result<()> = async {
+        // Pause must complete within a bounded time to avoid hanging the scaler.
+        timeout(
+            Duration::from_secs(API_CALL_TIMEOUT_SECS),
+            api_patch(&socket, "/vm", &json!({"state": "Paused"})),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("pause timed out after {}s", API_CALL_TIMEOUT_SECS))?
+        .context("failed to pause VM for snapshot")?;
 
-    timeout(
-        Duration::from_secs(SNAPSHOT_TIMEOUT_SECS),
-        api_put(&socket, "/snapshot/create", &json!({
-            "snapshot_type": "Full",
-            "snapshot_path": snap_path.to_str().unwrap(),
-            "mem_file_path": mem_path.to_str().unwrap(),
-        })),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("snapshot/create timed out after {}s", SNAPSHOT_TIMEOUT_SECS))?
-    .context("snapshot/create API failed")?;
+        timeout(
+            Duration::from_secs(SNAPSHOT_TIMEOUT_SECS),
+            api_put(&socket, "/snapshot/create", &json!({
+                "snapshot_type": "Full",
+                "snapshot_path": snap_path.to_str().unwrap(),
+                "mem_file_path": mem_path.to_str().unwrap(),
+            })),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("snapshot/create timed out after {}s", SNAPSHOT_TIMEOUT_SECS))?
+        .context("snapshot/create API failed")?;
+
+        Ok(())
+    }
+    .await;
+
+    if let Err(ref e) = result {
+        // If no snapshot files were written, remove the empty dir so it doesn't
+        // accumulate as a false positive for "has snapshot" checks.
+        if !snap_path.exists() && !mem_path.exists() {
+            tracing::warn!(
+                "firecracker: snapshot failed for {}, removing empty dir: {}",
+                container_name, e
+            );
+            let _ = tokio::fs::remove_dir_all(&snap_dir).await;
+        }
+        return result;
+    }
 
     tracing::info!("firecracker: snapshot saved for {}", container_name);
 
@@ -169,6 +187,127 @@ pub async fn restore(container_name: &str) -> Result<u16> {
 
     tracing::info!("firecracker: VM {} restored from snapshot", container_name);
     Ok(host_port)
+}
+
+/// Fork an existing snapshot into a new, isolated VM instance.
+///
+/// Restores `base_container`'s snapshot under `fork_container` with a
+/// sparse-copied rootfs so writes are isolated. The fork has no DB entry;
+/// call `kill_fork` to clean up after the request completes.
+pub async fn restore_fork(base_container: &str, fork_container: &str) -> Result<u16> {
+    let snap_dir = snapshot_dir(base_container);
+    let snap_path = snap_dir.join("snapshot.bin");
+    let mem_path = snap_dir.join("memory.bin");
+    if !snap_path.exists() || !mem_path.exists() {
+        anyhow::bail!("no snapshot for base container {}", base_container);
+    }
+
+    let base_rootfs = rootfs_path(base_container);
+    if !base_rootfs.exists() {
+        anyhow::bail!("no rootfs for base container {}", base_container);
+    }
+
+    let fork_rootfs = rootfs_path(fork_container);
+    let fork_port = derive_host_port(fork_container);
+    let base_port = derive_host_port(base_container);
+    let base_tap = TapDevice::derive(base_container);
+    let netns = ForkNetns::derive(fork_container);
+    let socket = socket_path(fork_container);
+
+    // Sparse-copy isolates the fork's writes from the base rootfs.
+    let status = tokio::process::Command::new("cp")
+        .args(["--sparse=always", base_rootfs.to_str().unwrap(), fork_rootfs.to_str().unwrap()])
+        .status()
+        .await
+        .context("cp --sparse=always failed")?;
+    if !status.success() {
+        anyhow::bail!("rootfs copy failed for fork {}", fork_container);
+    }
+
+    // From this point forward any error must clean up the sparse-copy rootfs
+    // (and any partially-created netns/Firecracker process) to avoid orphaned
+    // resources.  We use a macro so cleanup runs on all error branches without
+    // duplicating the logic.
+    macro_rules! cleanup_and_bail {
+        ($ctx:expr, $err:expr) => {{
+            let err = $err;
+            tracing::warn!("restore_fork: cleaning up {} after error: {}", fork_container, err);
+            kill_firecracker_process(fork_container).await;
+            netns.destroy().await;
+            let _ = tokio::fs::remove_file(&fork_rootfs).await;
+            return Err(anyhow::anyhow!("{}: {}", $ctx, err));
+        }};
+    }
+
+    // Tear down any stale fork from a previous attempt.
+    kill_firecracker_process(fork_container).await;
+    netns.destroy().await;
+
+    // Create an isolated network namespace containing a TAP with the same name
+    // that the snapshot expects.  This avoids the EBUSY conflict with the live
+    // base VM's TAP.
+    if let Err(e) = netns.create(&base_tap).await {
+        cleanup_and_bail!("fork netns setup failed", e);
+    }
+
+    // Start Firecracker inside the fork's network namespace so it opens the
+    // TAP from inside the namespace (no conflict with the base VM's TAP).
+    if let Err(e) = start_fork_firecracker_daemon(fork_container, &socket, &netns.ns_name).await {
+        cleanup_and_bail!("fork firecracker daemon failed", e);
+    }
+
+    let load_result = timeout(
+        Duration::from_secs(RESTORE_TIMEOUT_SECS),
+        api_put(&socket, "/snapshot/load", &json!({
+            "snapshot_path": snap_path.to_str().unwrap(),
+            "mem_backend": {
+                "backend_type": "File",
+                "backend_path": mem_path.to_str().unwrap(),
+            },
+            "enable_diff_snapshots": false,
+            "resume_vm": true,
+        })),
+    )
+    .await;
+    match load_result {
+        Err(_) => cleanup_and_bail!("fork restore timed out", format!("after {}s", RESTORE_TIMEOUT_SECS)),
+        Ok(Err(e)) => cleanup_and_bail!("fork snapshot/load API failed", e),
+        Ok(Ok(_)) => {}
+    }
+
+    // Set up host-side DNAT + policy routing so 127.0.0.1:fork_port → fork VM.
+    if let Err(e) = netns.add_port_forward(fork_port, base_tap.vm_ip, base_port).await {
+        cleanup_and_bail!("fork port-forward failed", e);
+    }
+
+    if let Err(e) = wait_for_port(fork_port, RESTORE_TIMEOUT_SECS).await {
+        cleanup_and_bail!(
+            format!("fork VM {} did not respond on port {}", fork_container, fork_port),
+            e
+        );
+    }
+
+    tracing::info!("firecracker: fork {} started on port {}", fork_container, fork_port);
+    Ok(fork_port)
+}
+
+/// Kill a fork VM and clean up its network namespace + rootfs copy.
+pub async fn kill_fork(fork_container: &str, base_container: &str) {
+    let fork_port = derive_host_port(fork_container);
+    let base_port = derive_host_port(base_container);
+    let base_tap = TapDevice::derive(base_container);
+    let netns = ForkNetns::derive(fork_container);
+    netns.remove_port_forward(fork_port, base_tap.vm_ip, base_port).await;
+    kill(fork_container).await.ok();
+    netns.destroy().await;
+    let _ = tokio::fs::remove_file(rootfs_path(fork_container)).await;
+    tracing::info!("firecracker: fork {} killed and cleaned up", fork_container);
+}
+
+/// Returns true if a full snapshot exists for `container_name`.
+pub fn snapshot_exists(container_name: &str) -> bool {
+    let dir = snapshot_dir(container_name);
+    dir.join("snapshot.bin").exists() && dir.join("memory.bin").exists()
 }
 
 /// Kill a running VM and clean up TAP / iptables. Rootfs and snapshot are kept.
@@ -388,6 +527,15 @@ fn build_init_script(
         lines.push(format!("cd {}", shell_quote(wd)));
     }
 
+    // Warm the page cache in the background before exec so the first tool call
+    // doesn't pay the cold-read penalty. Scan $HOME and the workdir — covers
+    // virtually all MCP servers (templates, DBs, etc. live under the user home).
+    // -xdev avoids crossing into /proc /sys /dev mounts.
+    lines.push(
+        r#"{ find "${HOME:-/root}" "$(pwd)" -xdev -type f 2>/dev/null | xargs cat > /dev/null 2>&1; } &"#.into()
+    );
+
+
     let exec_args = cmd.iter().map(|s| shell_quote(s)).collect::<Vec<_>>().join(" ");
     // Redirect exec stderr to stdout so errors appear in the Firecracker console log
     lines.push(format!("exec {} 2>&1", exec_args));
@@ -443,6 +591,41 @@ async fn start_firecracker_daemon(container_name: &str, socket: &Path) -> Result
     anyhow::bail!("firecracker API socket did not appear within 5s")
 }
 
+/// Start a Firecracker process inside a network namespace so the snapshot's
+/// expected TAP device can be opened without conflicting with the base VM.
+async fn start_fork_firecracker_daemon(
+    container_name: &str,
+    socket: &Path,
+    ns_name: &str,
+) -> Result<()> {
+    let _ = tokio::fs::remove_file(socket).await;
+    let log_path = format!("/tmp/fc-{}.log", container_name);
+    let log_file = std::fs::File::create(&log_path)
+        .with_context(|| format!("create fork firecracker log file {}", log_path))?;
+    let log_file2 = log_file.try_clone().context("clone log file handle")?;
+    tracing::info!("firecracker: fork daemon log → {}", log_path);
+    // Run `ip netns exec NS firecracker --api-sock SOCKET --id CONTAINER`
+    Command::new("ip")
+        .args([
+            "netns", "exec", ns_name,
+            "firecracker",
+            "--api-sock", socket.to_str().unwrap(),
+            "--id", container_name,
+        ])
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(log_file2))
+        .spawn()
+        .context("failed to spawn fork firecracker")?;
+
+    // Wait up to 5 s for the API socket (created on the host filesystem)
+    for _ in 0..50 {
+        if socket.exists() { return Ok(()); }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("fork firecracker API socket did not appear within 5s")
+}
+
+
 async fn configure_and_start(
     socket: &Path,
     rootfs: &Path,
@@ -470,8 +653,9 @@ async fn configure_and_start(
         "is_read_only": false,
     })).await.context("PUT /drives/rootfs")?;
 
+    let vcpu_count = if memory_mb >= 1024 { 4u64 } else if memory_mb >= 512 { 2 } else { 1 };
     api_put(socket, "/machine-config", &json!({
-        "vcpu_count": 1,
+        "vcpu_count": vcpu_count,
         "mem_size_mib": memory_mb,
     })).await.context("PUT /machine-config")?;
 
@@ -675,4 +859,83 @@ pub fn vm_socket_exists(container_name: &str) -> bool {
 
 fn snapshot_dir(container_name: &str) -> PathBuf {
     PathBuf::from(SNAPSHOT_DIR).join(container_name)
+}
+
+/// Remove Firecracker artefacts that belong to containers not in `known_containers`.
+///
+/// Cleans up three directories:
+/// - `SNAPSHOT_DIR/` — per-container subdirectories
+/// - `ROOTFS_DIR/`   — `<name>.ext4` and `<name>.marker` files
+/// - `SOCKET_DIR/`   — `<name>.socket` files whose process is no longer alive
+pub async fn cleanup_stale_resources(known_containers: &std::collections::HashSet<String>) {
+    // Snapshot directories
+    if let Ok(mut dir) = tokio::fs::read_dir(SNAPSHOT_DIR).await {
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !known_containers.contains(&name) {
+                    tracing::info!(
+                        "firecracker cleanup: removing orphan snapshot dir {}",
+                        name
+                    );
+                    let _ = tokio::fs::remove_dir_all(entry.path()).await;
+                }
+            }
+        }
+    }
+
+    // Rootfs and marker files.
+    //
+    // Fork rootfs files have the pattern `<base>-f<nanos>.ext4` — no DB entry,
+    // so they would normally be deleted as "orphan" files.  But we must NOT
+    // remove a fork rootfs while the fork VM is still running.
+    // A fork VM is alive iff its socket file responds to a connect.
+    if let Ok(mut dir) = tokio::fs::read_dir(ROOTFS_DIR).await {
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            let container = fname
+                .strip_suffix(".ext4")
+                .or_else(|| fname.strip_suffix(".marker"));
+            if let Some(c) = container {
+                if known_containers.contains(c) {
+                    continue; // base container — keep
+                }
+                // Detect fork names: ends with "-f" followed by one or more digits.
+                // e.g.  "my-server-f1234567890"
+                let is_fork = c.rfind("-f")
+                    .map(|pos| c[pos + 2..].chars().all(|ch| ch.is_ascii_digit()) && pos + 2 < c.len())
+                    .unwrap_or(false);
+
+                if is_fork && vm_socket_exists(c) {
+                    tracing::debug!(
+                        "firecracker cleanup: skipping live fork rootfs {}",
+                        fname
+                    );
+                    continue;
+                }
+                if is_fork {
+                    tracing::info!("firecracker cleanup: removing dead fork rootfs {}", fname);
+                } else {
+                    tracing::info!("firecracker cleanup: removing orphan rootfs file {}", fname);
+                }
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+
+    // Stale socket files (socket exists but no live process)
+    if let Ok(mut dir) = tokio::fs::read_dir(SOCKET_DIR).await {
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if let Some(c) = fname.strip_suffix(".socket") {
+                if !vm_socket_exists(c) {
+                    tracing::info!(
+                        "firecracker cleanup: removing stale socket for {}",
+                        c
+                    );
+                    let _ = tokio::fs::remove_file(entry.path()).await;
+                }
+            }
+        }
+    }
 }
