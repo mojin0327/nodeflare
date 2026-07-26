@@ -230,8 +230,88 @@ export default function BillingPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 border-4 rounded-full border-gray-200 border-t-violet-600 animate-spin" />
+      <div className="space-y-4 sm:space-y-6">
+        {/* Plan header */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="h-4 w-20 bg-gray-200 rounded animate-pulse" />
+          <div className="h-5 w-16 bg-gray-200 rounded animate-pulse" />
+          <div className="h-5 w-12 bg-gray-100 rounded animate-pulse" />
+        </div>
+
+        {/* Usage card */}
+        <div className="h-24 bg-gray-100 rounded-xl animate-pulse" />
+
+        {/* 2-column: receipt + calendar */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          {/* Receipt skeleton */}
+          <div>
+            <div className="h-4 w-20 bg-gray-200 rounded animate-pulse mb-2" />
+            <div className="border border-gray-300 rounded-lg overflow-hidden">
+              <div className="px-4 py-3 text-center border-b border-dashed border-gray-300">
+                <div className="h-4 w-20 bg-gray-200 rounded mx-auto mb-1 animate-pulse" />
+                <div className="h-3 w-12 bg-gray-100 rounded mx-auto animate-pulse" />
+              </div>
+              <div className="px-4 py-2 space-y-2 border-b border-dashed border-gray-300">
+                <div className="flex justify-between">
+                  <div className="h-3 w-16 bg-gray-200 rounded animate-pulse" />
+                  <div className="h-3 w-20 bg-gray-200 rounded animate-pulse" />
+                </div>
+                <div className="flex justify-between">
+                  <div className="h-3 w-16 bg-gray-200 rounded animate-pulse" />
+                  <div className="h-3 w-20 bg-gray-200 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="px-4 py-2 border-b border-dashed border-gray-300">
+                <div className="flex justify-between">
+                  <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+                  <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="px-4 py-2 bg-gray-50">
+                <div className="flex justify-between">
+                  <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+                  <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Calendar skeleton */}
+          <div>
+            <div className="h-4 w-20 bg-gray-200 rounded animate-pulse mb-2" />
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
+                <div className="w-6 h-6 bg-gray-100 rounded animate-pulse" />
+                <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
+                <div className="w-6 h-6 bg-gray-100 rounded animate-pulse" />
+              </div>
+              <div className="p-3">
+                <div className="grid grid-cols-7 gap-1 mb-1">
+                  {[...Array(7)].map((_, i) => (
+                    <div key={i} className="h-6 bg-gray-100 rounded animate-pulse" />
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {[...Array(35)].map((_, i) => (
+                    <div key={i} className="h-8 bg-gray-50 rounded animate-pulse" />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Payment method + email toggle */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          <div>
+            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse mb-2" />
+            <div className="border border-gray-200 rounded-lg p-4 h-[72px] bg-gray-50 animate-pulse" />
+          </div>
+          <div>
+            <div className="h-4 w-20 bg-gray-200 rounded animate-pulse mb-2" />
+            <div className="border border-gray-200 rounded-lg p-4 h-[72px] bg-gray-50 animate-pulse" />
+          </div>
+        </div>
       </div>
     );
   }

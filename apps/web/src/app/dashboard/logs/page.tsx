@@ -134,10 +134,38 @@ export default function LogsPage() {
 
   if (isLoadingServers) {
     return (
-      <div className="space-y-2">
-        {[...Array(10)].map((_, i) => (
-          <div key={i} className="h-8 bg-gray-100 animate-pulse rounded" />
-        ))}
+      <div className="max-w-6xl">
+        {/* Server select placeholder */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="h-9 w-40 bg-gray-100 rounded-lg animate-pulse" />
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex-1 h-9 bg-gray-100 rounded-lg animate-pulse" />
+          <div className="h-9 w-20 bg-gray-100 rounded-lg animate-pulse" />
+          <div className="h-9 w-9 bg-gray-100 rounded-lg animate-pulse" />
+          <div className="h-9 w-9 bg-gray-100 rounded-lg animate-pulse" />
+        </div>
+
+        {/* Table header */}
+        <div className="grid grid-cols-[200px_120px_100px_1fr] gap-2 px-4 py-2 border-b border-gray-200">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-3 bg-gray-200 rounded animate-pulse" />
+          ))}
+        </div>
+
+        {/* Log rows */}
+        <div className="space-y-px py-1">
+          {[...Array(12)].map((_, i) => (
+            <div key={i} className="grid grid-cols-[200px_120px_100px_1fr] gap-2 px-4 py-2.5">
+              <div className="h-4 bg-gray-100 rounded animate-pulse" />
+              <div className="h-4 w-16 bg-gray-100 rounded animate-pulse" />
+              <div className="h-4 w-12 bg-gray-100 rounded animate-pulse" />
+              <div className="h-4 w-32 bg-gray-100 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

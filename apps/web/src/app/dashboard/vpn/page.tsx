@@ -151,10 +151,23 @@ export default function VPNPage() {
 
       {/* Loading State */}
       {isLoadingData && (
-        <div className="space-y-3">
-          <div className="h-10 bg-gray-100 animate-pulse rounded" />
-          <div className="h-10 bg-gray-100 animate-pulse rounded" />
-          <div className="h-10 bg-gray-100 animate-pulse rounded" />
+        <div>
+          <div className="grid grid-cols-[1fr_1fr_1fr_2rem] gap-2 pb-2 border-b border-gray-200 mb-1">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-3 w-16 bg-gray-200 rounded animate-pulse" />
+            ))}
+            <div />
+          </div>
+          <div className="divide-y divide-gray-100">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="grid grid-cols-[1fr_1fr_1fr_2rem] gap-2 py-3">
+                <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
+                <div className="h-4 w-16 bg-gray-100 rounded animate-pulse" />
+                <div className="h-4 w-28 bg-gray-100 rounded animate-pulse" />
+                <div />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

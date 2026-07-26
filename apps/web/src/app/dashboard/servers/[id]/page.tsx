@@ -347,9 +347,39 @@ export default function ServerDetailPage() {
 
   if (isLoadingServers) {
     return (
-      <div className="space-y-4">
-        <div className="h-8 w-48 bg-gray-200 animate-pulse rounded" />
-        <div className="h-32 bg-gray-200 animate-pulse rounded-xl" />
+      <div className="max-w-5xl space-y-4 sm:space-y-6">
+        {/* Header: avatar + name/repo | buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="w-11 h-11 bg-gray-200 rounded-full animate-pulse flex-shrink-0" />
+            <div>
+              <div className="h-6 w-48 bg-gray-200 rounded animate-pulse mb-1.5" />
+              <div className="h-4 w-64 bg-gray-100 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <div className="h-9 w-36 bg-gray-200 rounded animate-pulse" />
+            <div className="w-9 h-9 bg-gray-100 rounded animate-pulse" />
+            <div className="w-9 h-9 bg-gray-100 rounded animate-pulse" />
+          </div>
+        </div>
+
+        {/* Endpoint URL area */}
+        <div className="h-10 bg-gray-100 rounded-lg animate-pulse" />
+
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto pb-0">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-9 w-24 bg-gray-100 rounded-t animate-pulse flex-shrink-0" />
+          ))}
+        </div>
+
+        {/* Tab content: deployment rows */}
+        <div className="space-y-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
+          ))}
+        </div>
       </div>
     );
   }
