@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker } from 'react-icons/si';
 import { Server, Plus, AlertCircle } from 'lucide-react';
+import { ServersPageSkeleton } from '../page-skeletons';
 
 interface Plan {
   plan: string;
@@ -87,31 +88,7 @@ export default function ServersPage() {
         </div>
       )}
 
-      {isLoading ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="rounded-lg border border-gray-200 p-6 animate-pulse">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-gray-200 rounded" />
-                  <div>
-                    <div className="h-4 w-28 bg-gray-200 rounded mb-1" />
-                    <div className="h-3 w-20 bg-gray-100 rounded" />
-                  </div>
-                </div>
-                <div className="h-6 w-20 bg-gray-100 rounded-full" />
-              </div>
-              <div className="space-y-2">
-                <div className="h-3 w-full bg-gray-100 rounded" />
-                <div className="h-3 w-3/4 bg-gray-100 rounded" />
-              </div>
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="h-3 w-full bg-gray-100 rounded" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : isErrorServers ? (
+      {isLoading ? <ServersPageSkeleton /> : isErrorServers ? (
         <div className="flex flex-col items-center justify-center py-20">
           <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
           <p className="text-muted-foreground mb-4">{t('loadError')}</p>

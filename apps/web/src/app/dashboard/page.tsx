@@ -10,7 +10,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { LayoutDashboard, Plus, AlertCircle, ChevronRight, Play } from 'lucide-react';
+import { Plus, AlertCircle, ChevronRight, Play } from 'lucide-react';
+import { DashboardPageSkeleton } from './page-skeletons';
 
 interface BatchStatsResponse {
   servers: {
@@ -77,8 +78,6 @@ export default function DashboardPage() {
 
   const servers = serversQuery.data;
   const plans = plansQuery.data;
-  const isLoadingServers = serversQuery.isLoading;
-  const isSuccessServers = serversQuery.isSuccess;
   const isErrorServers = serversQuery.isError;
 
   // 必要なデータの初期ローディング中（いずれかがロード中ならローディング表示）
@@ -112,65 +111,7 @@ export default function DashboardPage() {
     return { totalRequests, totalErrors, errorRate, uptime, isLoadingStats };
   }, [batchStats, runningServers.length, servers, isLoadingStats]);
 
-  // 初期ローディング
-  if (isInitialLoading) {
-    return (
-      <div>
-        <div className="flex justify-end mb-6">
-          <div className="h-8 w-36 bg-gray-200 rounded-full animate-pulse" />
-        </div>
-        <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-6">
-          <div className="h-4 w-28 bg-gray-200 rounded animate-pulse" />
-          <div className="hidden sm:block h-4 w-px bg-gray-200" />
-          <div className="h-4 w-28 bg-gray-200 rounded animate-pulse" />
-          <div className="hidden sm:block h-4 w-px bg-gray-200" />
-          <div className="h-4 w-20 bg-gray-200 rounded animate-pulse" />
-          <div className="ml-auto h-4 w-16 bg-gray-200 rounded animate-pulse" />
-        </div>
-        <div className="rounded-xl border border-gray-200 overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
-            <div className="h-3 w-16 bg-gray-200 rounded animate-pulse" />
-            <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
-          </div>
-          <div className="divide-y divide-gray-100">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3 bg-white">
-                <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse flex-shrink-0" />
-                <div className="flex-1 h-4 bg-gray-200 rounded animate-pulse" />
-                <div className="flex items-center gap-3">
-                  <div className="hidden sm:block h-3 w-12 bg-gray-100 rounded animate-pulse" />
-                  <div className="h-3 w-16 bg-gray-100 rounded animate-pulse" />
-                  <div className="w-4 h-4 bg-gray-100 rounded animate-pulse" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="mt-6 rounded-xl border border-gray-200 overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
-            <div className="h-3 w-20 bg-gray-200 rounded animate-pulse" />
-            <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4 sm:gap-8 p-4 bg-white">
-            <div className="flex-1 space-y-2">
-              <div className="flex items-baseline justify-between">
-                <div className="h-3 w-14 bg-gray-200 rounded animate-pulse" />
-                <div className="h-3 w-10 bg-gray-200 rounded animate-pulse" />
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full" />
-            </div>
-            <div className="flex-1 space-y-2">
-              <div className="flex items-baseline justify-between">
-                <div className="h-3 w-14 bg-gray-200 rounded animate-pulse" />
-                <div className="h-3 w-16 bg-gray-200 rounded animate-pulse" />
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (isInitialLoading) return <DashboardPageSkeleton />;
 
   const maxServers = currentPlan?.limits?.max_servers || DEFAULT_MAX_SERVERS;
   const maxRequests = currentPlan?.limits?.max_requests_per_month || DEFAULT_MAX_REQUESTS;
@@ -227,11 +168,7 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="divide-y divide-gray-100">
-          {isLoadingServers ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-6 h-6 border-[3px] rounded-full border-gray-200 border-t-violet-600 animate-spin" />
-            </div>
-          ) : isErrorServers ? (
+          {isErrorServers ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <AlertCircle className="w-8 h-8 text-red-400 mb-2" />
               <p className="text-sm text-gray-500">{t('serversLoadError')}</p>
