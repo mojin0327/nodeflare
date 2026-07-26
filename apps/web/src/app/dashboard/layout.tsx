@@ -31,6 +31,16 @@ import { CSS } from '@dnd-kit/utilities';
 import { PageHeaderProvider, DashboardHeaderTitle } from './page-header';
 import { WorkspaceProvider, useWorkspace } from '@/hooks/use-workspace';
 import { WorkspaceSwitcher } from '@/components/workspace/workspace-switcher';
+import {
+  DashboardPageSkeleton,
+  ServersPageSkeleton,
+  BillingPageSkeleton,
+  LogsPageSkeleton,
+  TeamPageSkeleton,
+  SettingsPageSkeleton,
+  AuthPageSkeleton,
+  VPNPageSkeleton,
+} from './page-skeletons';
 
 interface NavItem {
   id: string;
@@ -62,6 +72,18 @@ export default function DashboardLayout({
       </WorkspaceProvider>
     </PageHeaderProvider>
   );
+}
+
+function getRouteSkeleton(href: string): React.ReactNode {
+  if (href === '/dashboard') return <DashboardPageSkeleton />;
+  if (href === '/dashboard/servers') return <ServersPageSkeleton />;
+  if (href === '/dashboard/billing') return <BillingPageSkeleton />;
+  if (href === '/dashboard/logs') return <LogsPageSkeleton />;
+  if (href === '/dashboard/team') return <TeamPageSkeleton />;
+  if (href === '/dashboard/settings') return <SettingsPageSkeleton />;
+  if (href.startsWith('/dashboard/auth')) return <AuthPageSkeleton />;
+  if (href === '/dashboard/vpn') return <VPNPageSkeleton />;
+  return null;
 }
 
 function DashboardShell({
@@ -404,7 +426,9 @@ function DashboardShell({
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-4 md:p-6 bg-card overflow-y-auto overflow-x-hidden">{children}</main>
+        <main className="flex-1 p-4 md:p-6 bg-card overflow-y-auto overflow-x-hidden">
+          {pendingHref ? (getRouteSkeleton(pendingHref) ?? children) : children}
+        </main>
       </div>
     </div>
   );
