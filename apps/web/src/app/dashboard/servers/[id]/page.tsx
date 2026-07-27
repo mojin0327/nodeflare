@@ -102,6 +102,7 @@ export default function ServerDetailPage() {
   const queryClient = useQueryClient();
   const serverId = params.id as string;
   const [activeTab, setActiveTab] = useState<'deployments' | 'test' | 'secrets' | 'webhooks' | 'metrics' | 'settings'>('deployments');
+  const [autoSelectDeploymentId, setAutoSelectDeploymentId] = useState<string | null>(null);
   const [showDeployInfo, setShowDeployInfo] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deployError, setDeployError] = useState<string | null>(null);
@@ -239,11 +240,14 @@ export default function ServerDetailPage() {
       // Show loading toast when deployment starts
       deploymentToastIdRef.current = toast.loading(t('deploy.started'));
     },
-    onSuccess: () => {
+    onSuccess: (data: Deployment) => {
       setDeployError(null);
       queryClient.invalidateQueries({ queryKey: ['server', activeWorkspace?.id, serverId] });
       queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'deployments'] });
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'deployments', 'usage'] });
+      // Auto-open the build logs panel for this deployment
+      setActiveTab('deployments');
+      setAutoSelectDeploymentId(data.id);
       // Toast will be updated by WebSocket when deployment completes
     },
     onError: (error: any) => {
@@ -794,7 +798,7 @@ export default function ServerDetailPage() {
 
         <div className="mt-6">
           {activeTab === 'deployments' && (
-            <DeploymentsTab deployments={deployments ?? []} workspaceId={workspaceId} serverId={serverId} t={t} tCommon={tCommon} />
+            <DeploymentsTab deployments={deployments ?? []} workspaceId={workspaceId} serverId={serverId} t={t} tCommon={tCommon} autoSelectDeploymentId={autoSelectDeploymentId} />
           )}
           {activeTab === 'test' && (
             <TestTab
@@ -844,9 +848,16 @@ export default function ServerDetailPage() {
   );
 }
 
-function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon }: { deployments: Deployment[]; workspaceId?: string; serverId: string; t: (key: string) => string; tCommon: (key: string) => string }) {
+function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, autoSelectDeploymentId }: { deployments: Deployment[]; workspaceId?: string; serverId: string; t: (key: string) => string; tCommon: (key: string) => string; autoSelectDeploymentId?: string | null }) {
   const [selectedDeployment, setSelectedDeployment] = useState<string | null>(null);
   const [buildElapsed, setBuildElapsed] = useState<Record<string, number>>({});
+
+  // Auto-open log panel when a new deployment is triggered from the deploy button
+  useEffect(() => {
+    if (autoSelectDeploymentId) {
+      setSelectedDeployment(autoSelectDeploymentId);
+    }
+  }, [autoSelectDeploymentId]);
 
   // Timer for build elapsed time
   useEffect(() => {

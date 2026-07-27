@@ -1393,17 +1393,9 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
             .await
             .ok();
 
-            ctx.events
-                .publish_deployment_status(
-                    job.deployment_id,
-                    job.server_id,
-                    mcp_common::types::DeploymentStatus::Succeeded,
-                    None,
-                    Some(100),
-                )
-                .await
-                .ok();
-
+            // Update server status in DB BEFORE publishing deployment succeeded,
+            // so that when the frontend receives Succeeded and re-fetches the server,
+            // it already sees status=running instead of building.
             if let Err(e) = ServerRepository::update_status(
                 &ctx.db,
                 job.server_id,
@@ -1420,6 +1412,17 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                 Some(deploy_result.endpoint_url.clone()),
                 None,
             ).await.ok();
+
+            ctx.events
+                .publish_deployment_status(
+                    job.deployment_id,
+                    job.server_id,
+                    mcp_common::types::DeploymentStatus::Succeeded,
+                    None,
+                    Some(100),
+                )
+                .await
+                .ok();
 
             // Update region status; store container_name as the machine_id
             if let Err(e) = ServerRegionRepository::update(
