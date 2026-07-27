@@ -369,7 +369,7 @@ async fn extract_rootfs(
 
     // Get image metadata via nerdctl image inspect (no throwaway container needed)
     let inspect_out = Command::new("nerdctl")
-        .args(["image", "inspect", image])
+        .args(["--address", "/run/containerd/containerd.sock", "image", "inspect", image])
         .output().await
         .context("nerdctl image inspect failed")?;
     if !inspect_out.status.success() {

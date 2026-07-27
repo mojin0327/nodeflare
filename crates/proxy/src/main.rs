@@ -1691,9 +1691,10 @@ async fn code_exec_tools_call(
         tracing::warn!("code-exec[{}]: missing bearer token", server_id);
         return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
     };
-    // consume_code_exec uses GETDEL: the token is deleted atomically on first use,
-    // so it cannot be replayed within its TTL window.
-    let Some(ctx) = state.redis_cache.consume_code_exec(token).await else {
+    // get_code_exec reads without deleting: the same token must be valid for all
+    // tool calls within a single code execution (up to max_tool_calls, same session).
+    // Replay protection comes from UUID v4 entropy + short TTL (timeout_secs+10s).
+    let Some(ctx) = state.redis_cache.get_code_exec(token).await else {
         tracing::warn!("code-exec[{}]: invalid or expired token", server_id);
         return (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response();
     };

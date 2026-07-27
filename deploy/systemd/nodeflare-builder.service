@@ -8,6 +8,7 @@ Type=simple
 User=nodeflare
 Group=nodeflare
 EnvironmentFile=/opt/nodeflare/env/builder.env
+Environment=XDG_CONFIG_HOME=/opt/nodeflare/.config
 ExecStart=/opt/nodeflare/bin/mcp-builder
 Restart=on-failure
 RestartSec=5s

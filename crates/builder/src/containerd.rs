@@ -2,9 +2,57 @@ use anyhow::{Context, Result};
 use mcp_common::AppConfig;
 use mcp_queue::{BuildJob, DeployJob, SecretEnv};
 use std::path::Path;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::flyctl;
+
+/// Spawn a command and stream stdout+stderr through `on_log` line-by-line.
+/// Returns true if the process exited successfully.
+async fn run_streaming(
+    mut cmd: Command,
+    secrets: &[SecretEnv],
+    on_log: impl Fn(&str),
+) -> Result<bool> {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("Failed to spawn process")?;
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let tx2 = tx.clone();
+
+    let h1 = tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = tx.send(line);
+        }
+    });
+    let h2 = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = tx2.send(line);
+        }
+    });
+    // When both reader tasks finish, rx will close.
+    tokio::spawn(async move { let _ = tokio::join!(h1, h2); });
+
+    while let Some(line) = rx.recv().await {
+        let sanitized = flyctl::sanitize_log_output(&line, secrets);
+        if !sanitized.trim().is_empty() {
+            on_log(&sanitized);
+        }
+    }
+
+    let status = child.wait().await?;
+    Ok(status.success())
+}
 
 /// Result of a successful container build + run.
 pub struct DeployResult {
@@ -81,57 +129,45 @@ pub async fn build_and_run(
 
     // ─── nerdctl build ───────────────────────────────────────────────────────
     on_log(&format!("Building image: {}", image));
-    let build_output = tokio::time::timeout(
+    let mut build_cmd = Command::new("nerdctl");
+    build_cmd
+        .args([
+            "--address", "/run/containerd/containerd.sock",
+            "build",
+            "--label", &format!("nodeflare.container={}", container_name),
+            "--label", &format!("nodeflare.commit={}", job.commit_sha),
+            "-t", &image,
+            ".",
+        ])
+        .current_dir(source_dir);
+    let build_ok = tokio::time::timeout(
         std::time::Duration::from_secs(BUILD_TIMEOUT_SECS),
-        Command::new("nerdctl")
-            .args([
-                "build",
-                "--label", &format!("nodeflare.container={}", container_name),
-                "--label", &format!("nodeflare.commit={}", job.commit_sha),
-                "-t", &image,
-                ".",
-            ])
-            .current_dir(source_dir)
-            .kill_on_drop(true)
-            .output(),
+        run_streaming(build_cmd, secrets, |l| on_log(l)),
     )
     .await
     .map_err(|_| anyhow::anyhow!("nerdctl build timed out after {}s", BUILD_TIMEOUT_SECS))?
     .context("Failed to run nerdctl build")?;
 
-    let stdout = String::from_utf8_lossy(&build_output.stdout);
-    let stderr = String::from_utf8_lossy(&build_output.stderr);
-    let sanitized = flyctl::sanitize_log_output(&format!("{}\n{}", stdout, stderr), secrets);
-    for line in sanitized.lines() {
-        if !line.trim().is_empty() {
-            on_log(line);
-        }
-    }
-
-    if !build_output.status.success() {
-        let summary = flyctl::extract_error_lines(&sanitized, 15);
-        let message = if summary.is_empty() { sanitized } else { summary };
-        return Err(anyhow::anyhow!("Build failed:\n{}", message));
+    if !build_ok {
+        return Err(anyhow::anyhow!("Build failed — see build logs above"));
     }
     on_log("Image built successfully");
 
     // ─── nerdctl push (optional, when registry is configured) ────────────────
     if !config.container.registry_base.is_empty() {
         on_log(&format!("Pushing image to registry: {}", image));
-        let push_output = tokio::time::timeout(
+        let mut push_cmd = Command::new("nerdctl");
+        push_cmd.args(["--address", "/run/containerd/containerd.sock", "push", &image]);
+        let push_ok = tokio::time::timeout(
             std::time::Duration::from_secs(BUILD_TIMEOUT_SECS),
-            Command::new("nerdctl")
-                .args(["push", &image])
-                .kill_on_drop(true)
-                .output(),
+            run_streaming(push_cmd, secrets, |l| on_log(l)),
         )
         .await
         .map_err(|_| anyhow::anyhow!("nerdctl push timed out"))?
         .context("Failed to run nerdctl push")?;
 
-        if !push_output.status.success() {
-            let err = String::from_utf8_lossy(&push_output.stderr);
-            return Err(anyhow::anyhow!("nerdctl push failed: {}", err.trim()));
+        if !push_ok {
+            return Err(anyhow::anyhow!("nerdctl push failed — see build logs above"));
         }
         on_log("Image pushed to registry");
     }
