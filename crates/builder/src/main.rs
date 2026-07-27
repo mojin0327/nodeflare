@@ -1414,6 +1414,12 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
             {
                 tracing::error!("Failed to update server status to Running: {}", e);
             }
+            ctx.events.publish_server_status(
+                job.server_id,
+                mcp_common::types::ServerStatus::Running,
+                Some(deploy_result.endpoint_url.clone()),
+                None,
+            ).await.ok();
 
             // Update region status; store container_name as the machine_id
             if let Err(e) = ServerRegionRepository::update(
@@ -1521,6 +1527,12 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
                 {
                     tracing::error!("Failed to update server status to Failed: {}", e);
                 }
+                ctx.events.publish_server_status(
+                    job.server_id,
+                    mcp_common::types::ServerStatus::Failed,
+                    None,
+                    Some(full_error_msg.clone()),
+                ).await.ok();
             }
 
             // Send failure email notification
@@ -1611,6 +1623,12 @@ async fn handle_build_failure(ctx: &BuilderContext, job: &BuildJob, error_msg: &
         )
         .await
         .ok();
+        ctx.events.publish_server_status(
+            job.server_id,
+            mcp_common::types::ServerStatus::Failed,
+            None,
+            Some(full_error_msg.clone()),
+        ).await.ok();
     } else {
         tracing::info!(
             "Skipping server status update to Failed for deployment {} (version {}) - newer successful deployment exists",

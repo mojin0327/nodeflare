@@ -110,6 +110,26 @@ impl EventPublisher {
         self.publish(&channel, &message).await
     }
 
+    /// Publish a server status update
+    pub async fn publish_server_status(
+        &self,
+        server_id: Uuid,
+        status: crate::types::ServerStatus,
+        endpoint_url: Option<String>,
+        error_message: Option<String>,
+    ) -> Result<(), PublishError> {
+        let message = WsMessage::ServerStatus(crate::types::ServerStatusUpdate {
+            server_id,
+            status,
+            endpoint_url,
+            error_message,
+            timestamp: Utc::now(),
+        });
+
+        let channel = format!("ws:server:{}:status", server_id);
+        self.publish(&channel, &message).await
+    }
+
     /// Publish a server log line
     pub async fn publish_server_log(
         &self,

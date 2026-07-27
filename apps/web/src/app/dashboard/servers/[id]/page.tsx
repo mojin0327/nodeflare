@@ -117,6 +117,10 @@ export default function ServerDetailPage() {
     queryKey: ['server', activeWorkspace?.id, serverId],
     queryFn: () => api.get<McpServer>(`/workspaces/${activeWorkspace!.id}/servers/${serverId}`),
     enabled: !!activeWorkspace && !!serverId,
+    refetchInterval: (query) => {
+      const status = (query.state.data as McpServer | undefined)?.status;
+      return (status === 'building' || status === 'deploying') ? 5000 : false;
+    },
   });
 
   const server = serverQuery.data;
@@ -127,11 +131,15 @@ export default function ServerDetailPage() {
 
   useSetPageHeader(server?.name ?? t('title'), <Boxes className="w-4 h-4" />);
 
-  // Fetch deployments separately to enable conditional polling during builds
+  // Fetch deployments separately; poll every 5s during active builds as WebSocket fallback
   const deploymentsQuery = useQuery({
     queryKey: ['servers', serverId, 'deployments'],
     queryFn: () => api.get<Deployment[]>(`/workspaces/${workspaceId}/servers/${serverId}/deployments`),
     enabled: !!workspaceId,
+    refetchInterval: (query) => {
+      const data = (query.state.data as Deployment[] | undefined);
+      return data?.some(d => ['pending', 'building', 'deploying', 'pushing'].includes(d.status)) ? 5000 : false;
+    },
   });
 
   const deployments = deploymentsQuery.data;
