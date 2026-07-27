@@ -1546,6 +1546,16 @@ fn rust_binary_copy_and_cmd(project: &ProjectStructure) -> (String, String) {
 
 /// Generate Dockerfile for STDIO transport with adapter
 /// The adapter wraps the STDIO MCP server and exposes it as HTTP/SSE
+/// Escape a string for safe embedding in a Dockerfile `ENV name="<value>"` instruction.
+/// Prevents Dockerfile injection if the value contains backslashes, double-quotes,
+/// or newlines (a newline would end the ENV line and start a new instruction).
+fn dockerfile_env_value_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "")
+        .replace('\r', "")
+}
+
 fn generate_stdio_dockerfile(
     runtime: &str,
     mcp_path: &str,
@@ -1555,6 +1565,9 @@ fn generate_stdio_dockerfile(
     build_command: Option<&str>,
     project: &ProjectStructure,
 ) -> String {
+    // Escape mcp_path once here so every format string below is safe.
+    let mcp_path = dockerfile_env_value_escape(mcp_path);
+    let mcp_path = mcp_path.as_str();
     // An entry command the user (or their committed Dockerfile) stated *explicitly*.
     // Only an explicit command triggers wrapping the project's own Dockerfile — we
     // never wrap someone's Dockerfile around a merely-guessed command.
@@ -1742,6 +1755,8 @@ fn format_python_entry_command(cmd: &str) -> String {
 /// Uses multi-stage build: first stage builds using original Dockerfile,
 /// second stage adds Node.js and STDIO adapter
 fn generate_stdio_dockerfile_with_existing(_runtime: &str, mcp_path: &str, entry_command: &str, original_dockerfile: &str) -> String {
+    let mcp_path_escaped = dockerfile_env_value_escape(mcp_path);
+    let mcp_path = mcp_path_escaped.as_str();
     // Standard port for STDIO adapter
     let port = STDIO_PORT;
 

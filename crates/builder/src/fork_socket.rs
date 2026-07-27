@@ -9,11 +9,23 @@
 /// Connection lifetime = resource lifetime.  When the proxy drops a connection
 /// (normally or on crash), the kernel sends SHUT_WR, which the server detects
 /// as EOF and uses as the cleanup signal.  No HTTP call needed, no orphan risk.
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+
+static FORK_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Container names must be non-empty alphanumeric+hyphen strings ≤ 64 chars.
+/// This prevents JSON injection in socket requests and bounds activeMap memory.
+fn is_valid_container_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
 
 /// Shared counter: number of active proxy connections per base container.
 /// The scale-to-zero scaler checks this before snapshotting.
@@ -41,6 +53,14 @@ pub async fn run(socket_path: &str, active: ActiveMap) {
             return;
         }
     };
+
+    // Restrict to owner-only so other processes on the host cannot connect.
+    if let Err(e) = std::fs::set_permissions(
+        socket_path,
+        std::fs::Permissions::from_mode(0o600),
+    ) {
+        tracing::warn!("fork socket: failed to set permissions on {}: {}", socket_path, e);
+    }
 
     tracing::info!("fork socket: listening on {}", socket_path);
 
@@ -83,9 +103,17 @@ async fn handle_connection(stream: tokio::net::UnixStream, active: ActiveMap) {
     };
 
     if let Some(container) = req["hold"].as_str() {
+        if !is_valid_container_name(container) {
+            let _ = write_half.write_all(b"{\"error\":\"invalid container name\"}\n").await;
+            return;
+        }
         // ── "hold" request: base VM active-request lease ──────────────────────
         handle_hold(container, reader, write_half, active).await;
     } else if let Some(base) = req["base"].as_str() {
+        if !is_valid_container_name(base) {
+            let _ = write_half.write_all(b"{\"error\":\"invalid container name\"}\n").await;
+            return;
+        }
         // ── "base" request: fork VM lifecycle ─────────────────────────────────
         handle_fork(base, reader, write_half, active).await;
     } else {
@@ -133,13 +161,15 @@ async fn handle_fork(
     mut write_half: tokio::io::WriteHalf<tokio::net::UnixStream>,
     active: ActiveMap,
 ) {
-    // Derive a unique fork name (same algorithm as the HTTP endpoint).
-    let ns = std::time::SystemTime::now()
+    // Derive a unique fork name: millisecond timestamp + atomic counter prevents
+    // collisions under concurrent same-millisecond requests.
+    let ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let prefix = &base[..base.len().min(28)];
-    let fork = format!("{}-f{}", prefix, ns);
+    let seq = FORK_SEQ.fetch_add(1, Ordering::Relaxed);
+    let prefix = &base[..base.len().min(20)];
+    let fork = format!("{}-f{}{:06}", prefix, ms, seq % 1_000_000);
 
     // Count this fork as an active request on the base container so the
     // scale-to-zero scaler doesn't overwrite the snapshot files mid-restore.

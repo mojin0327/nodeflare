@@ -512,14 +512,31 @@ fn build_init_script(
     // Image-level defaults (PATH, NODE_VERSION, PYTHON_VERSION, etc.)
     for pair in image_env {
         if let Some((k, v)) = pair.split_once('=') {
-            lines.push(format!("export {}={}", k, shell_quote(v)));
+            // Validate key: POSIX variable name ([A-Za-z_][A-Za-z0-9_]*).
+            // A crafted OCI image could inject shell metacharacters via the key;
+            // the value is already protected by shell_quote.
+            let valid_key = !k.is_empty()
+                && k.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
+                && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if valid_key {
+                lines.push(format!("export {}={}", k, shell_quote(v)));
+            } else {
+                tracing::warn!("build_init_script: skipping OCI image env with invalid key: {:?}", k);
+            }
         }
     }
 
     // Runtime overrides: these win over image defaults for any duplicate key.
     // PORT must equal derive_host_port so the DNAT mapping is consistent.
     for (k, v) in runtime_env {
-        lines.push(format!("export {}={}", k, shell_quote(v)));
+        let valid_key = !k.is_empty()
+            && k.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if valid_key {
+            lines.push(format!("export {}={}", k, shell_quote(v)));
+        } else {
+            tracing::warn!("build_init_script: skipping runtime env with invalid key: {:?}", k);
+        }
     }
 
     let wd = if workdir.is_empty() { "/" } else { workdir };
@@ -737,8 +754,11 @@ async fn api_request(socket: &Path, method: &str, path: &str, body: &serde_json:
 }
 
 async fn kill_firecracker_process(container_name: &str) {
+    // Use "firecracker.*--id {name}( |$)" (no wildcard between --id and the name)
+    // so we only match the exact container and not any name that has container_name
+    // as a prefix (e.g. "mcp-abc" must not kill "mcp-abc-fork1").
     Command::new("pkill")
-        .args(["-f", &format!("firecracker.*--id.*{}", container_name)])
+        .args(["-f", &format!("firecracker.*--id {}( |$)", container_name)])
         .output().await.ok();
     let _ = tokio::fs::remove_file(socket_path(container_name)).await;
 }
@@ -787,7 +807,7 @@ fn ctr_image_ref(image: &str) -> String {
 /// Return the PID of the running Firecracker process for a container, if any.
 pub async fn find_vm_pid(container_name: &str) -> Option<u32> {
     let out = Command::new("pgrep")
-        .args(["-f", &format!("firecracker.*--id.*{}", container_name)])
+        .args(["-f", &format!("firecracker.*--id {}( |$)", container_name)])
         .output().await.ok()?;
     if !out.status.success() { return None; }
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()

@@ -15,8 +15,20 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nodeflare-builder
 
-# Allow access to containerd socket
+# Allow access to containerd socket (builder only — not granted to proxy)
 SupplementaryGroups=containerd
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

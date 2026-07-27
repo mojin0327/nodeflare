@@ -213,7 +213,7 @@ pub async fn validate_oauth_token(
     token: &str,
     client_ip: &str,
 ) -> Result<OAuthAccessTokenWithClient, ProxyError> {
-    tracing::info!("Validating OAuth token from {} (token_prefix={}...)", client_ip, &token[..token.len().min(8)]);
+    tracing::debug!("Validating OAuth token from {}", client_ip);
 
     // Check if IP is locked out due to brute force
     tracing::debug!("Checking lockout status for {}", client_ip);

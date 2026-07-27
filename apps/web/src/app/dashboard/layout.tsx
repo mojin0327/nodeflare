@@ -136,7 +136,7 @@ function DashboardShell({
   const handleNavigation = useCallback((href: string) => {
     if (href === pathname) return;
     setPendingHref(href);
-    setMobileMenuOpen(false); // Close mobile menu on navigation
+    setMobileMenuOpen(false);
     startTransition(() => {
       router.push(href);
     });

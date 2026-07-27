@@ -18,8 +18,8 @@ echo "=== [2/6] containerd ==="
 CONTAINERD_URL="https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-${ARCH}.tar.gz"
 curl -fsSL "$CONTAINERD_URL" | tar -C /usr/local -xz
 
-# containerd systemd unit
-curl -fsSL "https://raw.githubusercontent.com/containerd/containerd/main/containerd.service" \
+# containerd systemd unit — pin to the installed version, not the rolling main branch
+curl -fsSL "https://raw.githubusercontent.com/containerd/containerd/v${CONTAINERD_VERSION}/containerd.service" \
     -o /etc/systemd/system/containerd.service
 systemctl daemon-reload
 systemctl enable --now containerd
@@ -37,7 +37,14 @@ curl -fsSL "$NERDCTL_URL" | tar -C /usr/local/bin -xz nerdctl
 nerdctl --version
 
 echo "=== [5/6] Caddy ==="
-curl -fsSL https://raw.githubusercontent.com/caddyserver/install/master/install.sh | bash
+# Use official apt repository instead of curl|bash to avoid supply-chain risk.
+apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+    | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+    | tee /etc/apt/sources.list.d/caddy-stable.list
+apt-get update -qq
+apt-get install -y caddy
 
 echo "=== [6/6] nodeflare user + directories ==="
 id -u nodeflare &>/dev/null || useradd -r -s /sbin/nologin -G containerd nodeflare

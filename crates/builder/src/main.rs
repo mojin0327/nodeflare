@@ -120,9 +120,40 @@ async fn plan_memory_ceiling_mb(pool: &mcp_db::DbPool, server_id: uuid::Uuid) ->
     ceiling.unwrap_or_else(|| mcp_billing::PlanLimits::default().max_memory_mb as u64)
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
+
+/// Container names accepted by the internal HTTP API: non-empty, ≤64 chars,
+/// alphanumeric + hyphens only.  Prevents regex metacharacters from reaching
+/// pkill/pgrep -f and path traversal in /proc/<pid>/status lookups.
+fn is_valid_container_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// XOR-fold constant-time bearer token comparison.
+/// Prevents statistical timing attacks on BUILDER_TOKEN from a co-located
+/// process (e.g. a compromised Firecracker VM on the same host).
+fn bearer_token_eq(presented: Option<&str>, expected: &str) -> bool {
+    let presented = match presented {
+        Some(s) => s,
+        None => return false,
+    };
+    let expected_full = format!("Bearer {}", expected);
+    let a = presented.as_bytes();
+    let b = expected_full.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Per-process monotonic counter combined with a millisecond timestamp to give
+/// fork names that are unique even under concurrent and same-millisecond requests.
+static FORK_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Preprocessed error hint for efficient matching
 /// Scalability: Keywords are pre-lowercased to avoid repeated string operations
@@ -558,8 +589,14 @@ async fn main() -> Result<()> {
 
     // HTTP server: health + internal API (exec / stats / metrics from API)
     let http_port = std::env::var("BUILDER_HTTP_PORT").unwrap_or_else(|_| "8083".to_string());
-    let http_addr = format!("0.0.0.0:{}", http_port);
-    let builder_token = std::env::var("BUILDER_TOKEN").unwrap_or_default();
+    // Bind to loopback only — the internal API must never be reachable from external IPs.
+    // Network-level firewall is a second layer; this is the primary defense.
+    let http_addr = format!("127.0.0.1:{}", http_port);
+    let builder_token = std::env::var("BUILDER_TOKEN")
+        .expect("BUILDER_TOKEN must be set");
+    if builder_token.is_empty() {
+        panic!("BUILDER_TOKEN must not be empty — set a random secret of at least 32 characters");
+    }
 
     let http_router = Router::new()
         .route("/health", get(|| async { "OK" }))
@@ -569,11 +606,9 @@ async fn main() -> Result<()> {
             move |headers: axum::http::HeaderMap, _path: axum::extract::Path<String>, _body: axum::Json<serde_json::Value>| {
                 let tok = tok.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     // Firecracker VMs are not containers: exec requires a guest agent
                     // (e.g. vsock-based) which is not yet implemented.
@@ -586,11 +621,9 @@ async fn main() -> Result<()> {
             move |headers: axum::http::HeaderMap| {
                 let tok = tok.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     // List running Firecracker VMs by active socket files + live process check
                     let vms = firecracker::list_running_vms().await;
@@ -603,13 +636,14 @@ async fn main() -> Result<()> {
             move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
                 let tok = tok.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     let container = path.0;
+                    if !is_valid_container_name(&container) {
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid container name"})));
+                    }
                     // Read VM RSS from the Firecracker process's /proc entry
                     match firecracker::vm_rss_bytes(&container).await {
                         Some(rss_bytes) => {
@@ -638,13 +672,14 @@ async fn main() -> Result<()> {
                 let db = db.clone();
                 let crypto = crypto.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     let container = path.0;
+                    if !is_valid_container_name(&container) {
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid container name"})));
+                    }
                     match firecracker::restore(&container).await {
                         Ok(_port) => {
                             tracing::info!("scale-to-zero: restored VM {} from snapshot", container);
@@ -714,20 +749,23 @@ async fn main() -> Result<()> {
             move |headers: axum::http::HeaderMap, path: axum::extract::Path<String>| {
                 let tok = tok.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     let base = path.0;
-                    // Derive a unique fork name from the base + nanosecond timestamp
-                    let ns = std::time::SystemTime::now()
+                    if !is_valid_container_name(&base) {
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid container name"})));
+                    }
+                    // Unique fork name: millisecond timestamp + atomic counter avoids
+                    // collisions under concurrent same-millisecond requests.
+                    let ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.subsec_nanos())
+                        .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
-                    let prefix = &base[..base.len().min(28)];
-                    let fork = format!("{}-f{}", prefix, ns);
+                    let seq = FORK_SEQ.fetch_add(1, Ordering::Relaxed);
+                    let prefix = &base[..base.len().min(20)];
+                    let fork = format!("{}-f{}{:06}", prefix, ms, seq % 1_000_000);
                     match firecracker::restore_fork(&base, &fork).await {
                         Ok(port) => (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
                             "fork_container": fork,
@@ -747,13 +785,14 @@ async fn main() -> Result<()> {
             move |headers: axum::http::HeaderMap, path: axum::extract::Path<(String, String)>| {
                 let tok = tok.clone();
                 async move {
-                    if !tok.is_empty() {
-                        let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
-                        if auth != Some(&format!("Bearer {}", tok)) {
-                            return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
-                        }
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+                    if !bearer_token_eq(auth, &tok) {
+                        return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "unauthorized"})));
                     }
                     let (base, fork) = path.0;
+                    if !is_valid_container_name(&base) || !is_valid_container_name(&fork) {
+                        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid container name"})));
+                    }
                     firecracker::kill_fork(&fork, &base).await;
                     (axum::http::StatusCode::OK, axum::Json(serde_json::json!({"killed": fork})))
                 }

@@ -539,6 +539,17 @@ async fn proxy_handler(
             "proxy_handler: auth disabled for server {}, skipping credential validation",
             server.id
         );
+        // auth_enabled=false: no credential to throttle by, so enforce a per-IP
+        // cap to prevent a single client from flooding the server.
+        let ip_limit: u64 = std::env::var("UNAUTHENTICATED_RATE_LIMIT_PER_MINUTE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        match rate_limit::check_by_ip(&state, &client_ip, ip_limit).await {
+            Ok(_) => {}
+            Err(ProxyError::RateLimitExceeded) => return Err(ProxyError::RateLimitExceeded),
+            Err(e) => tracing::warn!("proxy_handler: IP rate limit check failed (continuing): {}", e),
+        }
         None
     };
 
@@ -737,17 +748,15 @@ async fn proxy_handler(
         server_id: server.id,
     };
 
-    let snapshot_ready = {
-        let snap_base = std::path::PathBuf::from("/opt/firecracker/snapshots")
-            .join(&server.container_name);
-        snap_base.join("snapshot.bin").exists() && snap_base.join("memory.bin").exists()
-    };
-
     // VmLease: held while this request is in flight.  The builder's scale-to-zero
     // scaler skips any container whose lease count > 0, preventing two races:
     //   1. Snapshotting a VM mid-request (kills the active connection).
     //   2. Overwriting snapshot files while a concurrent fork is restoring from them.
     // Best-effort: if the socket is unavailable we log and continue without a lease.
+    //
+    // NOTE: snapshot_ready must be checked AFTER hold_vm to close the TOCTOU window
+    // where the builder could begin snapshotting between the exists() check and the
+    // lease acquisition.
     let _vm_lease: Option<fork_socket::VmLease> =
         if let Some(socket_path) = state.fork_socket_path.as_deref() {
             match fork_socket::hold_vm(socket_path, &server.container_name).await {
@@ -763,6 +772,12 @@ async fn proxy_handler(
         } else {
             None
         };
+
+    let snapshot_ready = {
+        let snap_base = std::path::PathBuf::from("/opt/firecracker/snapshots")
+            .join(&server.container_name);
+        snap_base.join("snapshot.bin").exists() && snap_base.join("memory.bin").exists()
+    };
 
     // fork_lease: held until end of handler; dropping it sends EOF to builder → kill_fork.
     // http_fork_info: used by the HTTP fallback path for the explicit kill-fork call.
@@ -1676,7 +1691,9 @@ async fn code_exec_tools_call(
         tracing::warn!("code-exec[{}]: missing bearer token", server_id);
         return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
     };
-    let Some(ctx) = state.redis_cache.get_code_exec(token).await else {
+    // consume_code_exec uses GETDEL: the token is deleted atomically on first use,
+    // so it cannot be replayed within its TTL window.
+    let Some(ctx) = state.redis_cache.consume_code_exec(token).await else {
         tracing::warn!("code-exec[{}]: invalid or expired token", server_id);
         return (StatusCode::UNAUTHORIZED, "invalid or expired token").into_response();
     };

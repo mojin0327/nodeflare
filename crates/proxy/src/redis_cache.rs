@@ -269,6 +269,15 @@ impl RedisCache {
         result.and_then(|json| serde_json::from_str(&json).ok())
     }
 
+    /// Atomically fetch and delete a code-exec token (GETDEL).
+    /// Use this in the tools-call endpoint so each token is single-use,
+    /// preventing replay across the TTL window.
+    pub async fn consume_code_exec(&self, token: &str) -> Option<CodeExecContext> {
+        let cache_key = Self::code_exec_key(token);
+        let result: Option<String> = self.client.getdel(&cache_key).await.ok()?;
+        result.and_then(|json| serde_json::from_str(&json).ok())
+    }
+
     /// Invalidate all cached data for a server (call when server is updated)
     pub async fn invalidate_server_all(&self, slug: &str) {
         self.invalidate_server(slug).await;

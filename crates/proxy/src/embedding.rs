@@ -50,17 +50,16 @@ impl EmbeddingClient {
 
     /// Embed a single text (e.g. a search query). `None` on any failure.
     pub async fn embed(&self, text: &str) -> Option<Vec<f32>> {
-        let url = format!(
-            "{}/{}:embedContent?key={}",
-            ENDPOINT_BASE, self.model, self.api_key
-        );
+        // Pass the API key as a request header, not a URL query parameter,
+        // to avoid it appearing in access logs and HTTP tracing output.
+        let url = format!("{}/{}:embedContent", ENDPOINT_BASE, self.model);
         let body = json!({
             "model": format!("models/{}", self.model),
             "content": { "parts": [{ "text": text }] },
             "outputDimensionality": self.dimensions,
         });
 
-        let resp = match self.http.post(&url).json(&body).send().await {
+        let resp = match self.http.post(&url).header("x-goog-api-key", &self.api_key).json(&body).send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("gemini embed request failed: {}", e);
@@ -82,10 +81,7 @@ impl EmbeddingClient {
         if texts.is_empty() {
             return Some(Vec::new());
         }
-        let url = format!(
-            "{}/{}:batchEmbedContents?key={}",
-            ENDPOINT_BASE, self.model, self.api_key
-        );
+        let url = format!("{}/{}:batchEmbedContents", ENDPOINT_BASE, self.model);
         let requests: Vec<serde_json::Value> = texts
             .iter()
             .map(|t| {
@@ -98,7 +94,7 @@ impl EmbeddingClient {
             .collect();
         let body = json!({ "requests": requests });
 
-        let resp = match self.http.post(&url).json(&body).send().await {
+        let resp = match self.http.post(&url).header("x-goog-api-key", &self.api_key).json(&body).send().await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("gemini batch embed request failed: {}", e);

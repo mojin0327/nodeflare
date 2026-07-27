@@ -38,7 +38,9 @@ fn fallback_allow(key: &str, limit: u64, window_secs: u64) -> bool {
     };
 
     // Opportunistic cleanup to bound memory: drop entries from older windows.
-    if map.len() > 10_000 {
+    // Lower threshold (1,000) makes it harder to exhaust memory AND to exploit
+    // the window-reset behaviour by flooding with unique keys before cleanup.
+    if map.len() > 1_000 {
         map.retain(|_, (w, _)| *w == window);
     }
 
@@ -297,6 +299,50 @@ pub async fn check(
                 return Ok(());
             }
             return Err(ProxyError::RateLimitExceeded);
+        }
+    };
+
+    if result < 0 {
+        return Err(ProxyError::RateLimitExceeded);
+    }
+
+    Ok(())
+}
+
+/// Per-IP rate limit for unauthenticated (auth_enabled=false) servers.
+///
+/// auth_enabled=false means there is no credential to key a per-user counter on, so
+/// this is our only throttle against individual bad actors. We keep limits tighter
+/// than the per-credential default and key the Redis counter on the client IP.
+pub async fn check_by_ip(
+    state: &ProxyState,
+    ip: &str,
+    limit: u64,
+) -> Result<(), ProxyError> {
+    let now = chrono::Utc::now();
+    let minute_bucket = now.timestamp() / WINDOW_SIZE_SECONDS;
+    let key = format!("rate_limit:ip:{}:{}", ip, minute_bucket);
+    let ttl = WINDOW_SIZE_SECONDS + 5;
+
+    let result: Result<i64, _> = state
+        .redis
+        .eval(
+            RATE_LIMIT_SCRIPT,
+            &[key],
+            &[limit.to_string(), ttl.to_string()],
+        )
+        .await;
+
+    let result = match result {
+        Ok(v) => v,
+        Err(_) => {
+            note_redis_fallback("rate_limit_ip");
+            let fb_key = format!("rl_ip:{}", ip);
+            return if fallback_allow(&fb_key, limit, WINDOW_SIZE_SECONDS as u64) {
+                Ok(())
+            } else {
+                Err(ProxyError::RateLimitExceeded)
+            };
         }
     };
 

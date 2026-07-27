@@ -29,13 +29,14 @@ const SERVICE_PORT = Number(Deno.env.get("PORT") ?? "8080");
 const MAX_HEAP_MB = Number(Deno.env.get("RUNNER_MAX_HEAP_MB") ?? "128");
 const MAX_OUTPUT_BYTES = Number(Deno.env.get("RUNNER_MAX_OUTPUT_BYTES") ?? String(4 * 1024 * 1024));
 
-// Shared secret required from the proxy. Empty = unauthenticated (logged loudly below).
+// Shared secret required from the proxy. Fail-closed: refuse to start without it.
 const RUN_TOKEN = Deno.env.get("CODE_RUNNER_TOKEN") ?? "";
 if (!RUN_TOKEN) {
   console.error(
-    "[startup] WARNING: CODE_RUNNER_TOKEN is unset — /run is UNAUTHENTICATED. " +
-      "Set the same secret on this app and the proxy to lock it down.",
+    "[startup] FATAL: CODE_RUNNER_TOKEN is unset. " +
+      "Set the same secret on this app and the proxy. Refusing to start.",
   );
+  Deno.exit(1);
 }
 
 // Constant-time string comparison to avoid leaking the token via response timing.
@@ -157,6 +158,12 @@ async function runSandboxed(req: RunRequest): Promise<{ output?: unknown; error?
     console.error(`[run] invalid tools_endpoint: ${req.tools_endpoint}`);
     return { error: "invalid tools_endpoint" };
   }
+  // Prevent --allow-net from accidentally receiving multiple hosts if the
+  // endpoint URL is crafted to contain commas, newlines, or spaces.
+  if (/[,\n\r ]/.test(host)) {
+    console.error(`[run] rejected: tools_endpoint host contains disallowed characters: ${JSON.stringify(host)}`);
+    return { error: "invalid tools_endpoint: host contains disallowed characters" };
+  }
   const guid = crypto.randomUUID();
   const program = bootstrap(req, guid);
   const timeoutMs = (req.timeout_secs ?? 15) * 1000;
@@ -264,8 +271,8 @@ Deno.serve({ port: SERVICE_PORT, hostname: "::" }, async (req) => {
   }
   if (req.method === "POST" && url.pathname === "/run") {
     console.error("[run] request received");
-    // Require the shared secret when configured (fail-closed on mismatch).
-    if (RUN_TOKEN && !safeEqual(req.headers.get("authorization") ?? "", `Bearer ${RUN_TOKEN}`)) {
+    // Always require the shared secret (RUN_TOKEN is guaranteed non-empty at startup).
+    if (!safeEqual(req.headers.get("authorization") ?? "", `Bearer ${RUN_TOKEN}`)) {
       console.error("[run] rejected: missing/invalid runner token");
       return Response.json({ error: "unauthorized" }, { status: 401 });
     }

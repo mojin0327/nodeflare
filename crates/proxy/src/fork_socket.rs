@@ -11,6 +11,12 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+fn is_valid_container_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Shared helpers
 // ──────────────────────────────────────────────────────────────────────────────
@@ -65,7 +71,9 @@ pub struct ForkLease {
 /// Returns a `ForkLease` that keeps the fork alive until dropped.
 /// Returns `Err` on any failure so the caller can fall back to the base VM.
 pub async fn request_fork(socket_path: &str, base: &str) -> anyhow::Result<ForkLease> {
-    // Container names are alphanumeric + hyphens, safe in JSON without escaping.
+    if !is_valid_container_name(base) {
+        anyhow::bail!("fork socket: invalid container name: {:?}", base);
+    }
     let req = format!("{{\"base\":\"{}\"}}\n", base);
     let (read_half, write_half) = connect_and_send(socket_path, &req).await?;
     let resp = read_response(read_half).await?;
@@ -113,6 +121,9 @@ pub struct VmLease {
 /// Returns `Err` on failure; callers should log and continue without a lease
 /// (scale-to-zero protection is best-effort when the socket is unavailable).
 pub async fn hold_vm(socket_path: &str, container: &str) -> anyhow::Result<VmLease> {
+    if !is_valid_container_name(container) {
+        anyhow::bail!("fork socket: invalid container name: {:?}", container);
+    }
     let req = format!("{{\"hold\":\"{}\"}}\n", container);
     let (read_half, write_half) = connect_and_send(socket_path, &req).await?;
     // Builder responds {"ok":true} once the lease is registered.

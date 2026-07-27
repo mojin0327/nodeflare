@@ -9,9 +9,9 @@
 
 use bytes::Bytes;
 use lru::LruCache;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
 
@@ -98,8 +98,15 @@ impl RequestCache {
     /// upstream MCP server that filters tools by the caller's OAuth scope. Omitting
     /// it would let one caller's cached (or coalesced in-flight) list be served to
     /// another, an information leak.
+    ///
+    /// Uses `RandomState` (randomly seeded at process start) instead of
+    /// `DefaultHasher::new()` (fixed seed = 0) to prevent HashDOS: an adversary
+    /// cannot precompute inputs that all collide onto the same shard.
     fn cache_key(endpoint: &str, identity: &[u8], body: &[u8]) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        static HASH_STATE: OnceLock<std::collections::hash_map::RandomState> = OnceLock::new();
+        let mut hasher = HASH_STATE
+            .get_or_init(std::collections::hash_map::RandomState::new)
+            .build_hasher();
         endpoint.hash(&mut hasher);
         identity.hash(&mut hasher);
         body.hash(&mut hasher);
