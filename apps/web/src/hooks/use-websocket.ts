@@ -99,7 +99,10 @@ export function useWebSocket({
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
+  // Prevent onConnect from firing on every periodic Pong — only fire on first connect per session
+  const hasCalledOnConnectRef = useRef(false);
 
   // Store callbacks in refs to avoid dependency issues
   const onMessageRef = useRef(onMessage);
@@ -114,6 +117,30 @@ export function useWebSocket({
     onDisconnectRef.current = onDisconnect;
     onErrorRef.current = onError;
   }, [onMessage, onConnect, onDisconnect, onError]);
+
+  // Send periodic Ping to keep the connection alive through proxy idle timeouts
+  useEffect(() => {
+    if (status !== 'connected') {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      return;
+    }
+
+    pingIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'Ping' }));
+      }
+    }, 30_000);
+
+    return () => {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+  }, [status]);
 
   const connect = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -140,11 +167,15 @@ export function useWebSocket({
       try {
         const message = JSON.parse(event.data) as WebSocketMessage;
 
-        // Handle ping/pong
+        // Handle ping/pong — also used for periodic keep-alive
         if (message.type === 'Pong') {
           setStatus('connected');
           reconnectAttemptsRef.current = 0;
-          onConnectRef.current?.();
+          // Only fire onConnect once per WS session; periodic Pongs must not re-fire it
+          if (!hasCalledOnConnectRef.current) {
+            hasCalledOnConnectRef.current = true;
+            onConnectRef.current?.();
+          }
           return;
         }
 
@@ -170,6 +201,7 @@ export function useWebSocket({
 
     ws.onclose = () => {
       if (!isMountedRef.current) return;
+      hasCalledOnConnectRef.current = false;
       setStatus('disconnected');
       wsRef.current = null;
       onDisconnectRef.current?.();
@@ -212,6 +244,10 @@ export function useWebSocket({
 
     return () => {
       isMountedRef.current = false;
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;

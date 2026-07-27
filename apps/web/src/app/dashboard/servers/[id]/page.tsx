@@ -118,6 +118,11 @@ export default function ServerDetailPage() {
     queryKey: ['server', activeWorkspace?.id, serverId],
     queryFn: () => api.get<McpServer>(`/workspaces/${activeWorkspace!.id}/servers/${serverId}`),
     enabled: !!activeWorkspace && !!serverId,
+    // Poll during active deployments as fallback when WS is unavailable
+    refetchInterval: (query) => {
+      const s = query.state.data as McpServer | undefined;
+      return s?.status === 'building' || s?.status === 'deploying' ? 3000 : false;
+    },
   });
 
   const server = serverQuery.data;
@@ -132,6 +137,13 @@ export default function ServerDetailPage() {
     queryKey: ['servers', serverId, 'deployments'],
     queryFn: () => api.get<Deployment[]>(`/workspaces/${workspaceId}/servers/${serverId}/deployments`),
     enabled: !!workspaceId,
+    // Poll during active deployments as fallback when WS is unavailable
+    refetchInterval: (query) => {
+      const data = query.state.data as Deployment[] | undefined;
+      return data?.some(d => ['pending', 'building', 'deploying', 'pushing'].includes(d.status))
+        ? 3000
+        : false;
+    },
   });
 
   const deployments = deploymentsQuery.data;
