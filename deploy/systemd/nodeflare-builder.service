@@ -5,8 +5,8 @@ Requires=containerd.service
 
 [Service]
 Type=simple
-User=nodeflare
-Group=nodeflare
+User=root
+Group=root
 EnvironmentFile=/opt/nodeflare/env/builder.env
 Environment=XDG_CONFIG_HOME=/opt/nodeflare/.config
 ExecStart=/opt/nodeflare/bin/mcp-builder
@@ -16,8 +16,14 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nodeflare-builder
 
-# Allow access to containerd socket (builder only — not granted to proxy)
-SupplementaryGroups=containerd
+# Kernel/system hardening (retained even when running as root)
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # Hardening
 NoNewPrivileges=true
