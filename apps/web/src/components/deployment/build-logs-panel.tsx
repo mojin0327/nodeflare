@@ -174,9 +174,12 @@ export function BuildLogsPanel({
     },
   });
 
-  // Polling fallback: when WS is not connected, refresh historical logs every 3s
+  // Polling fallback: poll until WS actually delivers a message.
+  // isConnected=true only means Ping/Pong worked — log messages may still be lost.
+  // Stop polling only when realtimeLogs has entries (WS is genuinely delivering).
   useEffect(() => {
-    if (!workspaceId || !serverId || !deploymentId || isConnected) return;
+    if (!workspaceId || !serverId || !deploymentId) return;
+    if (realtimeLogs.length > 0) return;
 
     const poll = async () => {
       try {
@@ -194,7 +197,7 @@ export function BuildLogsPanel({
 
     const intervalId = setInterval(poll, 3000);
     return () => clearInterval(intervalId);
-  }, [workspaceId, serverId, deploymentId, isConnected]);
+  }, [workspaceId, serverId, deploymentId, realtimeLogs.length]);
 
   // Auto-scroll to bottom when new real-time logs arrive
   useEffect(() => {
