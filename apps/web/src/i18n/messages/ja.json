@@ -612,7 +612,9 @@
       "networkHistory": "ネットワークI/O履歴",
       "memoryUsed": "使用中",
       "memoryTotal": "合計",
-      "noData": "データがありません"
+      "noData": "データがありません",
+      "stoppedBanner": "サーバーは停止中です – 最後に記録されたデータを表示しています",
+      "startToViewMetrics": "サーバーを起動するとライブメトリクスが表示されます"
     },
     "status": {
       "running": "実行中",

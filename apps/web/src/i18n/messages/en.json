@@ -612,7 +612,9 @@
       "networkHistory": "Network I/O History",
       "memoryUsed": "Used",
       "memoryTotal": "Total",
-      "noData": "No data available"
+      "noData": "No data available",
+      "stoppedBanner": "Server is stopped — showing last recorded data",
+      "startToViewMetrics": "Start the server to see live metrics"
     },
     "status": {
       "running": "Running",

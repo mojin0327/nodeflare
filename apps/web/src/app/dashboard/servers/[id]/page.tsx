@@ -102,7 +102,7 @@ export default function ServerDetailPage() {
   const queryClient = useQueryClient();
   const serverId = params.id as string;
   const [activeTab, setActiveTab] = useState<'deployments' | 'test' | 'secrets' | 'webhooks' | 'metrics' | 'settings'>('deployments');
-  const [autoSelectDeploymentId, setAutoSelectDeploymentId] = useState<string | null>(null);
+  const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
   const [showDeployInfo, setShowDeployInfo] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deployError, setDeployError] = useState<string | null>(null);
@@ -239,7 +239,7 @@ export default function ServerDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'deployments'] });
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'deployments', 'usage'] });
       setActiveTab('deployments');
-      setAutoSelectDeploymentId(data.id);
+      setSelectedDeploymentId(data.id);
     },
     onError: (error: any) => {
       if (deploymentToastIdRef.current) {
@@ -789,7 +789,7 @@ export default function ServerDetailPage() {
 
         <div className="mt-6">
           {activeTab === 'deployments' && (
-            <DeploymentsTab deployments={deployments ?? []} workspaceId={workspaceId} serverId={serverId} t={t} tCommon={tCommon} autoSelectDeploymentId={autoSelectDeploymentId} />
+            <DeploymentsTab deployments={deployments ?? []} workspaceId={workspaceId} serverId={serverId} t={t} tCommon={tCommon} selectedDeploymentId={selectedDeploymentId} onSelectDeployment={setSelectedDeploymentId} />
           )}
           {activeTab === 'test' && (
             <TestTab
@@ -839,16 +839,8 @@ export default function ServerDetailPage() {
   );
 }
 
-function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, autoSelectDeploymentId }: { deployments: Deployment[]; workspaceId?: string; serverId: string; t: (key: string) => string; tCommon: (key: string) => string; autoSelectDeploymentId?: string | null }) {
-  const [selectedDeployment, setSelectedDeployment] = useState<string | null>(null);
+function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, selectedDeploymentId, onSelectDeployment }: { deployments: Deployment[]; workspaceId?: string; serverId: string; t: (key: string) => string; tCommon: (key: string) => string; selectedDeploymentId: string | null; onSelectDeployment: (id: string | null) => void }) {
   const [buildElapsed, setBuildElapsed] = useState<Record<string, number>>({});
-
-  // Auto-open log panel when a new deployment is triggered from the deploy button
-  useEffect(() => {
-    if (autoSelectDeploymentId) {
-      setSelectedDeployment(autoSelectDeploymentId);
-    }
-  }, [autoSelectDeploymentId]);
 
   // Timer for build elapsed time
   useEffect(() => {
@@ -889,21 +881,21 @@ function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, autoSe
   return (
     <div className="space-y-4">
       {/* Build Logs Panel */}
-      {selectedDeployment && (
+      {selectedDeploymentId && (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-sm font-medium text-gray-600">
-              {t('detail.buildLogs')} - {selectedDeployment.slice(0, 8)}
+              {t('detail.buildLogs')} - {selectedDeploymentId.slice(0, 8)}
             </h3>
             <button
-              onClick={() => setSelectedDeployment(null)}
+              onClick={() => onSelectDeployment(null)}
               className="text-sm text-gray-400 hover:text-gray-600"
             >
               {tCommon('close')}
             </button>
           </div>
           <BuildLogsPanel
-            deploymentId={selectedDeployment}
+            deploymentId={selectedDeploymentId}
             workspaceId={workspaceId}
             serverId={serverId}
             maxHeight="300px"
@@ -931,7 +923,7 @@ function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, autoSe
         <div className="flex-1 border border-gray-200 rounded-lg overflow-hidden">
           {deployments.map((deployment, index) => {
             const style = DEPLOYMENT_STATUS_COLORS[deployment.status] || DEPLOYMENT_STATUS_COLORS.pending;
-            const isSelected = selectedDeployment === deployment.id;
+            const isSelected = selectedDeploymentId === deployment.id;
             const isBuilding = deployment.status === 'building' || deployment.status === 'deploying' || deployment.status === 'pending' || deployment.status === 'pushing';
             const isSuccess = deployment.status === 'succeeded';
             const isLast = index === deployments.length - 1;
@@ -942,7 +934,7 @@ function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, autoSe
                 className={`flex items-start justify-between gap-4 py-3 px-4 bg-white transition-all cursor-pointer hover:bg-gray-50 ${
                   isSelected ? 'bg-violet-50' : ''
                 } ${!isLast ? 'border-b border-gray-200' : ''}`}
-                onClick={() => setSelectedDeployment(isSelected ? null : deployment.id)}
+                onClick={() => onSelectDeployment(isSelected ? null : deployment.id)}
               >
                 <div className="flex-1 min-w-0">
                   {/* Commit SHA */}
@@ -2446,11 +2438,11 @@ interface AppMetrics {
 }
 
 function MetricsTab({ serverId, workspaceId, serverStatus, t }: { serverId: string; workspaceId: string; serverStatus: string; t: (key: string) => string }) {
+  const isRunning = serverStatus === 'running';
   const { data: metrics, isLoading, error, refetch } = useQuery<AppMetrics>({
     queryKey: ['servers', serverId, 'metrics'],
     queryFn: () => api.get<AppMetrics>(`/workspaces/${workspaceId}/servers/${serverId}/metrics`),
-    enabled: serverStatus === 'running',
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: isRunning ? 30000 : false,
   });
 
   // Helper functions (not hooks, safe to define here)
@@ -2556,19 +2548,6 @@ function MetricsTab({ serverId, workspaceId, serverStatus, t }: { serverId: stri
         })
       : '';
 
-  // Now safe to have conditional returns after all hooks are called
-  if (serverStatus !== 'running') {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-          <BarChart3 className="w-8 h-8 text-gray-400" />
-        </div>
-        <p className="text-gray-500">{t('metrics.serverNotRunning')}</p>
-        <p className="text-sm text-gray-400 mt-1">{t('metrics.deployFirst')}</p>
-      </div>
-    );
-  }
-
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -2605,32 +2584,47 @@ function MetricsTab({ serverId, workspaceId, serverStatus, t }: { serverId: stri
     );
   }
 
-  // No samples at all in the window: the machine is idle/scaled to zero (or was never
-  // scraped). Show that honestly rather than a grid of zeros.
+  // No samples at all: idle/scaled-to-zero (running) or stopped with no history yet.
   if (!hasMetricData) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
           <BarChart3 className="w-8 h-8 text-gray-400" />
         </div>
-        <p className="text-gray-500">{t('metrics.idle')}</p>
-        <p className="text-sm text-gray-400 mt-1">{t('metrics.idleHint')}</p>
-        <button
-          onClick={() => refetch()}
-          className="mt-4 px-4 py-2 text-sm text-violet-600 hover:text-violet-700"
-        >
-          {t('metrics.retry')}
-        </button>
+        {isRunning ? (
+          <>
+            <p className="text-gray-500">{t('metrics.idle')}</p>
+            <p className="text-sm text-gray-400 mt-1">{t('metrics.idleHint')}</p>
+            <button
+              onClick={() => refetch()}
+              className="mt-4 px-4 py-2 text-sm text-violet-600 hover:text-violet-700"
+            >
+              {t('metrics.retry')}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-gray-500">{t('metrics.serverNotRunning')}</p>
+            <p className="text-sm text-gray-400 mt-1">{t('metrics.startToViewMetrics')}</p>
+          </>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Freshness badge: distinguish a live sample from a stale "last seen" one, since
-          scale-to-zero means the latest point can be hours old. */}
+      {/* Banner when server is stopped but historical data exists */}
+      {!isRunning && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-700">
+          <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+          {t('metrics.stoppedBanner')}
+        </div>
+      )}
+
+      {/* Freshness badge: "live" only when server is running and data is fresh */}
       <div className="flex items-center gap-2 text-xs">
-        {isMetricStale ? (
+        {!isRunning || isMetricStale ? (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
             {t('metrics.lastSeen')} {lastSeenLabel}
           </span>

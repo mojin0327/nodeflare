@@ -89,20 +89,13 @@ export default function NewServerPage() {
   });
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-
-  // Auto-select primary account when accounts load
-  useEffect(() => {
-    if (linkedAccounts && linkedAccounts.length > 0 && !selectedAccountId) {
-      const primary = linkedAccounts.find((a) => a.is_primary);
-      setSelectedAccountId(primary?.id || linkedAccounts[0].id);
-    }
-  }, [linkedAccounts, selectedAccountId]);
+  const effectiveAccountId = selectedAccountId ?? linkedAccounts?.find(a => a.is_primary)?.id ?? linkedAccounts?.[0]?.id ?? null;
 
   // Fetch repos from selected account
   const { data: repos, isLoading: reposLoading } = useQuery<GitHubRepo[]>({
-    queryKey: ['github-repos', selectedAccountId],
-    queryFn: () => getRepos(selectedAccountId || undefined),
-    enabled: !!selectedAccountId,
+    queryKey: ['github-repos', effectiveAccountId],
+    queryFn: () => getRepos(effectiveAccountId || undefined),
+    enabled: !!effectiveAccountId,
   });
 
   const [sourceType, setSourceType] = useState<SourceType>('my-repos');
@@ -212,22 +205,14 @@ export default function NewServerPage() {
         detectTarget!.repo,
         detectTarget!.branch,
         detectTarget!.subdir,
-        selectedAccountId || undefined,
+        effectiveAccountId || undefined,
       ),
     enabled: !!detectTarget,
     staleTime: 5 * 60_000,
   });
 
-  // Apply each new detection result exactly once. React Query hands back a stable `data`
-  // reference per result, so guarding on object identity re-applies when a *new* result
-  // arrives (e.g. after switching repos) but never double-applies on re-render.
-  const appliedRef = useRef<RepoDetection | null>(null);
   useEffect(() => {
-    const data = detectQuery.data;
-    if (data && appliedRef.current !== data) {
-      appliedRef.current = data;
-      applyDetection(data);
-    }
+    if (detectQuery.data) applyDetection(detectQuery.data);
   }, [detectQuery.data, applyDetection]);
 
   // Warm the inspect cache ahead of selection (repo hover/focus, URL paste). Dedup is
@@ -237,11 +222,11 @@ export default function NewServerPage() {
       if (!repo) return;
       queryClient.prefetchQuery({
         queryKey: inspectKey(repo, branch, subdir),
-        queryFn: () => inspectFn(repo, branch, subdir, selectedAccountId || undefined),
+        queryFn: () => inspectFn(repo, branch, subdir, effectiveAccountId || undefined),
         staleTime: 5 * 60_000,
       });
     },
-    [queryClient, selectedAccountId],
+    [queryClient, effectiveAccountId],
   );
 
   // Selecting a target just points `detectTarget` at it; the useQuery (warmed by prefetch)
@@ -452,8 +437,8 @@ export default function NewServerPage() {
   // then merged into the options below.
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const { data: remoteBranches } = useQuery<string[]>({
-    queryKey: ['github-branches', formData.github_repo, selectedAccountId],
-    queryFn: () => getBranches(formData.github_repo, selectedAccountId || undefined),
+    queryKey: ['github-branches', formData.github_repo, effectiveAccountId],
+    queryFn: () => getBranches(formData.github_repo, effectiveAccountId || undefined),
     enabled: branchMenuOpen && !!formData.github_repo,
     staleTime: 5 * 60_000,
   });
@@ -589,7 +574,7 @@ export default function NewServerPage() {
               <div>
                 <GitHubAccountSelector
                   accounts={linkedAccounts || []}
-                  selectedAccountId={selectedAccountId}
+                  selectedAccountId={effectiveAccountId}
                   onSelect={(id) => {
                     setSelectedAccountId(id);
                     setSelectedRepo(null);
