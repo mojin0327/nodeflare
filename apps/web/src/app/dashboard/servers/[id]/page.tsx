@@ -239,6 +239,11 @@ export default function ServerDetailPage() {
     },
     onSuccess: (data: Deployment) => {
       setDeployError(null);
+      // Immediately add the new deployment to the list so BuildLogsPanel mounts right away
+      queryClient.setQueryData<Deployment[]>(
+        ['servers', serverId, 'deployments'],
+        (old) => [data, ...(old ?? [])],
+      );
       queryClient.invalidateQueries({ queryKey: ['server', activeWorkspace?.id, serverId] });
       queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'deployments'] });
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'deployments', 'usage'] });

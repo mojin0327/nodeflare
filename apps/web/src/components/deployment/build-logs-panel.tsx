@@ -174,6 +174,28 @@ export function BuildLogsPanel({
     },
   });
 
+  // Polling fallback: when WS is not connected, refresh historical logs every 3s
+  useEffect(() => {
+    if (!workspaceId || !serverId || !deploymentId || isConnected) return;
+
+    const poll = async () => {
+      try {
+        const response = await api.get<LogsResponse>(
+          `/workspaces/${workspaceId}/servers/${serverId}/deployments/${deploymentId}/logs`
+        );
+        if (response.logs != null) {
+          setHistoricalLogs(response.logs);
+          setIsLoading(false);
+        }
+      } catch {
+        // Silently ignore
+      }
+    };
+
+    const intervalId = setInterval(poll, 3000);
+    return () => clearInterval(intervalId);
+  }, [workspaceId, serverId, deploymentId, isConnected]);
+
   // Auto-scroll to bottom when new real-time logs arrive
   useEffect(() => {
     if (autoScroll && bottomRef.current) {
