@@ -118,10 +118,6 @@ export default function ServerDetailPage() {
     queryKey: ['server', activeWorkspace?.id, serverId],
     queryFn: () => api.get<McpServer>(`/workspaces/${activeWorkspace!.id}/servers/${serverId}`),
     enabled: !!activeWorkspace && !!serverId,
-    refetchInterval: (query) => {
-      const status = (query.state.data as McpServer | undefined)?.status;
-      return (status === 'building' || status === 'deploying') ? 5000 : false;
-    },
   });
 
   const server = serverQuery.data;
@@ -132,15 +128,10 @@ export default function ServerDetailPage() {
 
   useSetPageHeader(server?.name ?? t('title'), <Boxes className="w-4 h-4" />);
 
-  // Fetch deployments separately; poll every 5s during active builds as WebSocket fallback
   const deploymentsQuery = useQuery({
     queryKey: ['servers', serverId, 'deployments'],
     queryFn: () => api.get<Deployment[]>(`/workspaces/${workspaceId}/servers/${serverId}/deployments`),
     enabled: !!workspaceId,
-    refetchInterval: (query) => {
-      const data = (query.state.data as Deployment[] | undefined);
-      return data?.some(d => ['pending', 'building', 'deploying', 'pushing'].includes(d.status)) ? 5000 : false;
-    },
   });
 
   const deployments = deploymentsQuery.data;
@@ -158,16 +149,10 @@ export default function ServerDetailPage() {
   // Track deployment toast for notifications
   const deploymentToastIdRef = useRef<string | number | null>(null);
 
-  // Replace polling with WebSocket: refetch list whenever deployment status changes
   useDeploymentWebSocket(activeDeploymentId, {
     onStatusUpdate: (status) => {
       refetchDeployments();
       if (status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled') {
-        // Refresh server record so the top-level status badge updates immediately
-        // (ServerStatusWebSocket may miss events).
-        queryClient.invalidateQueries({ queryKey: ['server', activeWorkspace?.id, serverId] });
-        // Also resolve the loading toast here as a fallback in case ServerStatusWebSocket
-        // doesn't deliver the event.
         if (deploymentToastIdRef.current) {
           if (status.status === 'succeeded') {
             toast.success(t('deploy.success'), { id: deploymentToastIdRef.current });
