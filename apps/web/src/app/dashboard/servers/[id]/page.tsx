@@ -220,7 +220,7 @@ export default function ServerDetailPage() {
   const currentWorkspace = workspaces?.find(w => w.id === workspaceId);
 
   const deployMutation = useMutation({
-    mutationFn: () => api.post(`/workspaces/${workspaceId}/servers/${serverId}/deploy`),
+    mutationFn: () => api.post<Deployment>(`/workspaces/${workspaceId}/servers/${serverId}/deploy`),
     onMutate: () => {
       // Show loading toast when deployment starts
       deploymentToastIdRef.current = toast.loading(t('deploy.started'));
