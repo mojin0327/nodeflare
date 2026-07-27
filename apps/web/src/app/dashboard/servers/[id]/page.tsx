@@ -146,9 +146,29 @@ export default function ServerDetailPage() {
 
   const refetchDeployments = deploymentsQuery.refetch;
 
+  // Track deployment toast for notifications
+  const deploymentToastIdRef = useRef<string | number | null>(null);
+
   // Replace polling with WebSocket: refetch list whenever deployment status changes
   useDeploymentWebSocket(activeDeploymentId, {
-    onStatusUpdate: () => { refetchDeployments(); },
+    onStatusUpdate: (status) => {
+      refetchDeployments();
+      if (status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled') {
+        // Refresh server record so the top-level status badge updates immediately
+        // (ServerStatusWebSocket may miss events).
+        queryClient.invalidateQueries({ queryKey: ['server', activeWorkspace?.id, serverId] });
+        // Also resolve the loading toast here as a fallback in case ServerStatusWebSocket
+        // doesn't deliver the event.
+        if (deploymentToastIdRef.current) {
+          if (status.status === 'succeeded') {
+            toast.success(t('deploy.success'), { id: deploymentToastIdRef.current });
+          } else {
+            toast.error(t('deploy.failed'), { id: deploymentToastIdRef.current });
+          }
+          deploymentToastIdRef.current = null;
+        }
+      }
+    },
   });
 
   // Fetch secrets
@@ -166,9 +186,6 @@ export default function ServerDetailPage() {
     enabled: !!workspaceId,
   });
   const deploymentUsage = deploymentUsageQuery.data;
-
-  // Track deployment toast for notifications
-  const deploymentToastIdRef = useRef<string | number | null>(null);
 
   // Real-time server status via WebSocket
   useServerStatusWebSocket(
@@ -1113,8 +1130,13 @@ function TestTab({
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="w-8 h-8 border-4 rounded-full border-gray-200 border-t-violet-600 animate-spin" />
+      <div className="space-y-6">
+        <div className="h-14 bg-gray-100 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -2165,8 +2187,14 @@ function WebhooksTab({
 
   if (isLoading) {
     return (
-      <div className="py-16 flex justify-center">
-        <div className="w-8 h-8 border-4 rounded-full border-gray-200 border-t-violet-600 animate-spin" />
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="h-8 w-32 bg-gray-100 rounded-lg animate-pulse" />
+          <div className="h-9 w-36 bg-gray-100 rounded-lg animate-pulse" />
+        </div>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />
+        ))}
       </div>
     );
   }
@@ -2533,8 +2561,17 @@ function MetricsTab({ serverId, workspaceId, serverStatus, t }: { serverId: stri
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-8 h-8 border-4 rounded-full border-gray-200 border-t-violet-600 animate-spin" />
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-24 bg-gray-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="h-72 bg-gray-100 rounded-xl animate-pulse" />
+          <div className="h-72 bg-gray-100 rounded-xl animate-pulse" />
+          <div className="h-72 bg-gray-100 rounded-xl animate-pulse lg:col-span-2" />
+        </div>
       </div>
     );
   }
