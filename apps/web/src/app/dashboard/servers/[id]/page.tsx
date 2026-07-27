@@ -160,21 +160,28 @@ export default function ServerDetailPage() {
 
   // Track deployment toast for notifications
   const deploymentToastIdRef = useRef<string | number | null>(null);
+  const pendingDeploymentIdRef = useRef<string | null>(null);
 
+  // Single source of truth: resolve toast when the tracked deployment reaches a terminal state.
+  // Both the WS path (via refetchDeployments) and background polling feed into `deployments`.
+  useEffect(() => {
+    if (!deploymentToastIdRef.current || !pendingDeploymentIdRef.current) return;
+    const deployment = deployments?.find(d => d.id === pendingDeploymentIdRef.current);
+    if (!deployment) return;
+    if (deployment.status === 'succeeded') {
+      toast.success(t('deploy.success'), { id: deploymentToastIdRef.current });
+    } else if (deployment.status === 'failed' || deployment.status === 'cancelled') {
+      toast.error(t('deploy.failed'), { id: deploymentToastIdRef.current });
+    } else {
+      return;
+    }
+    deploymentToastIdRef.current = null;
+    pendingDeploymentIdRef.current = null;
+  }, [deployments, t]);
+
+  // WS triggers a refetch to feed fresh data into the effect above
   useDeploymentWebSocket(activeDeploymentId, {
-    onStatusUpdate: (status) => {
-      refetchDeployments();
-      if (status.status === 'succeeded' || status.status === 'failed' || status.status === 'cancelled') {
-        if (deploymentToastIdRef.current) {
-          if (status.status === 'succeeded') {
-            toast.success(t('deploy.success'), { id: deploymentToastIdRef.current });
-          } else {
-            toast.error(t('deploy.failed'), { id: deploymentToastIdRef.current });
-          }
-          deploymentToastIdRef.current = null;
-        }
-      }
-    },
+    onStatusUpdate: () => { refetchDeployments(); },
   });
 
   // Fetch secrets
@@ -199,23 +206,6 @@ export default function ServerDetailPage() {
     serverId,
     {
       onStatusUpdate: (status) => {
-        const newStatus = status.status;
-
-        // Show toast notification when deployment completes (if we have an active toast)
-        if (deploymentToastIdRef.current) {
-          if (newStatus === 'running') {
-            // Deployment succeeded
-            toast.success(t('deploy.success'), { id: deploymentToastIdRef.current });
-            deploymentToastIdRef.current = null;
-          } else if (newStatus === 'failed' || newStatus === 'stopped') {
-            // Deployment failed
-            toast.error(t('deploy.failed'), { id: deploymentToastIdRef.current });
-            deploymentToastIdRef.current = null;
-          }
-          // For 'building', 'deploying', 'pending' - keep showing the loading toast
-        }
-
-        // Update the server status in cache
         queryClient.setQueryData<McpServer>(['server', activeWorkspace?.id, serverId], (old) =>
           old
             ? { ...old, status: status.status, endpoint_url: status.endpoint_url || old.endpoint_url }
@@ -239,6 +229,7 @@ export default function ServerDetailPage() {
     },
     onSuccess: (data: Deployment) => {
       setDeployError(null);
+      pendingDeploymentIdRef.current = data.id;
       // Immediately add the new deployment to the list so BuildLogsPanel mounts right away
       queryClient.setQueryData<Deployment[]>(
         ['servers', serverId, 'deployments'],
@@ -247,17 +238,15 @@ export default function ServerDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['server', activeWorkspace?.id, serverId] });
       queryClient.invalidateQueries({ queryKey: ['servers', serverId, 'deployments'] });
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId, 'deployments', 'usage'] });
-      // Auto-open the build logs panel for this deployment
       setActiveTab('deployments');
       setAutoSelectDeploymentId(data.id);
-      // Toast will be updated by WebSocket when deployment completes
     },
     onError: (error: any) => {
-      // Dismiss loading toast on error
       if (deploymentToastIdRef.current) {
         toast.dismiss(deploymentToastIdRef.current);
         deploymentToastIdRef.current = null;
       }
+      pendingDeploymentIdRef.current = null;
       const errorCode = error?.code;
       if (errorCode) {
         try {
