@@ -45,7 +45,7 @@ Nodeflareの使い方は驚くほどシンプルです。
 
 **それだけです。**
 
-stdio形式のMCPが自動的にSSE形式に変換され、`https://your-server.nodeflare.tech/mcp` のようなエンドポイントとして利用可能になります。ローカルにクローンする必要も、ビルド環境を整える必要も、一切ありません。
+stdio形式のMCPが自動的にStreamable HTTP形式に変換され、`https://your-server.nodeflare.tech/mcp` のようなエンドポイントとして利用可能になります。ローカルにクローンする必要も、ビルド環境を整える必要も、一切ありません。
 
 ---
 
@@ -65,25 +65,25 @@ Nodeflareは以下の技術スタックを自動認識し、適切なビルド�
 
 リポジトリに含まれる`package.json`、`requirements.txt`、`Dockerfile`などを自動検出し、最適なビルド戦略を選択します。
 
-### 2. stdio → SSE自動変換
+### 2. stdio → Streamable HTTP 自動変換
 
 ここがNodeflareの技術的なコアです。
 
-従来のstdio形式MCPは、標準入出力を通じてJSON-RPCメッセージをやり取りします。Nodeflareのプロキシゲートウェイは、これをHTTPベースのSSE（Server-Sent Events）形式にリアルタイム変換します。
+従来のstdio形式MCPは、標準入出力を通じてJSON-RPCメッセージをやり取りします。NodeflareのプロキシゲートウェイはこれをMCP標準の**Streamable HTTP**トランスポートにリアルタイム変換します。
 
 ```
 [クライアント]
-    ↓ HTTPリクエスト（POST /mcp, Accept: text/event-stream）
+    ↓ HTTPリクエスト（POST /mcp）
 [Nodeflare Proxy Gateway]
     ↓ JSON-RPC変換
 [MCPサーバー (stdio)]
     ↓ 標準出力
 [Nodeflare Proxy Gateway]
-    ↓ SSEストリーム
+    ↓ Streamable HTTPレスポンス
 [クライアント]
 ```
 
-この変換は完全に透過的で、クライアント側からはネイティブのSSE対応MCPサーバーと同様に扱えます。ストリーミング対応なので、大量のデータを返す処理でもリアルタイムに結果を受け取れます。
+この変換は完全に透過的で、ClaudeなどStreamable HTTP対応クライアントからそのまま利用できます。
 
 ### 3. 認証機能の自動付与
 
@@ -251,7 +251,7 @@ Nodeflareは以下の技術スタックで構築されています：
 | フロントエンド   | Next.js 16 + TypeScript                |
 | データベース     | PostgreSQL（Neon サーバーレス）        |
 | キャッシュ/キュー | Redis（Upstash）                       |
-| コンテナ         | Fly.io Machines（グローバルエッジ）    |
+| コンテナ         | containerd（ベアメタル）               |
 | 課金             | Stripe                                 |
 
 Rustによるバックエンドは、メモリ安全性とパフォーマンスを両立。MCPプロキシゲートウェイでは、リクエスト結合（Request Coalescing）やインメモリキャッシングにより、高負荷時でも安定したレスポンスを維持します。
@@ -263,7 +263,7 @@ Rustによるバックエンドは、メモリ安全性とパフォーマンス�
 **Nodeflareは、MCPエコシステムの「ラストワンマイル」を埋めるサービスです。**
 
 - GitHubにあるMCPを試すのに、もうクローンは不要
-- stdio形式のMCPが、自動でSSE形式に変換される
+- stdio形式のMCPが、自動でStreamable HTTP形式に変換される
 - 認証・認可・ログ記録は最初から組み込み済み
 - ブラウザ版Claudeやmanusからも直接利用可能
 

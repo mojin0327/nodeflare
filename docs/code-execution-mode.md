@@ -14,8 +14,8 @@ by keeping tool schemas and intermediate data out of the model context.
   runner client, wraps the result. Degrades to an error result when no runner is set.
 - **Runner client** (`crates/proxy/src/code_runner.rs`): POSTs to `PROXY_CODE_RUNNER_URL`;
   `None` (disabled) when unset.
-- **Sandbox service** (`services/code-runner/`, `fly.code-runner.toml`): Deno-on-Fly
-  (= Firecracker microVM), scale-to-zero. Each request runs in a fresh child:
+- **Sandbox service** (`services/code-runner/`): Deno process running on bare-metal via
+  `nerdctl run`. Each request runs in a fresh child:
   `deno run --no-prompt --allow-net=<tools-endpoint-host> -` — no fs/env/run, network
   restricted to the proxy tool endpoint only. Injects `tools.*`, enforces tool-call
   count + wall-clock timeout, returns a GUID-framed result.

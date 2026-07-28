@@ -17,7 +17,6 @@ Thank you for your interest in contributing to Nodeflare! This document provides
 - Node.js 20.x or later
 - PostgreSQL (or [Neon](https://neon.tech) / [Supabase](https://supabase.com))
 - Redis (or [Upstash](https://upstash.com))
-- [Fly.io](https://fly.io) account (for deployment features)
 - GitHub OAuth App (for authentication)
 
 ### Setup Steps

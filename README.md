@@ -15,46 +15,35 @@ Nodeflare is an MCP (Model Context Protocol) hosting platform that lets you depl
 - 🔄 **Automatic stdio→Streamable HTTP conversion** — Works with any MCP server
 - 🔐 **Built-in authentication** — API keys, OAuth 2.0, scoped permissions
 - 📊 **Access logging** — Full audit trail for enterprise compliance
-- 🌍 **Global edge deployment** — Powered by Fly.io
+- 🌍 **Global edge deployment** — Powered by bare-metal + Fly.io
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Nodeflare                               │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Next.js   │  │  API Server │  │     Proxy Gateway       │  │
-│  │  Frontend   │──│   (Axum)    │──│   (Rate Limit, Auth)    │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-│         │                │                      │               │
-│         │                │                      │               │
-│  ┌──────┴────────────────┴──────────────────────┴──────────┐   │
-│  │                    PostgreSQL + Redis                    │   │
-│  │                    (Neon + Upstash)                      │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│         │                                                       │
-│  ┌──────┴──────┐                                               │
-│  │   Builder   │───────────────────────────────────────────────┤
-│  │   Worker    │         Build & Deploy                        │
-│  └─────────────┘                                               │
-│         │                                                       │
-│  ┌──────┴──────────────────────────────────────────────────┐   │
-│  │              Fly.io Machines (Container Runtime)         │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │   │
-│  │  │ MCP Srv │  │ MCP Srv │  │ MCP Srv │  │ MCP Srv │    │   │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘    │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+[Vercel]              [Fly.io]
+Next.js Frontend      API Server (Axum)
+       │                    │
+       └──────────┬──────────┘
+                  │ (Neon PostgreSQL + Upstash Redis)
+                  │
+            [Bare-metal]
+         Caddy (TLS termination)
+                  │
+          Proxy Gateway (Axum)
+          Builder Worker (Axum)
+                  │
+       containerd / Unix Socket
+        ┌────┬────┬────┐
+     MCP Srv MCP Srv ...  (per-server containers)
 ```
 
 ## Tech Stack
 
 - **Backend**: Rust (Axum, SQLx, Tokio)
-- **Frontend**: Next.js 15, TypeScript, Tailwind CSS
+- **Frontend**: Next.js 16, TypeScript, Tailwind CSS
 - **Database**: [Neon](https://neon.tech) (Serverless PostgreSQL)
 - **Cache/Queue**: [Upstash](https://upstash.com) (Serverless Redis)
-- **Container Runtime**: Fly.io Machines
+- **Container Runtime**: containerd (bare-metal) / Fly.io (API)
 - **Billing**: Stripe
 
 ## Project Structure
@@ -65,7 +54,7 @@ nodeflare/
 │   ├── api/            # Main API server (Axum)
 │   ├── auth/           # JWT, OAuth, API keys, encryption
 │   ├── billing/        # Stripe billing
-│   ├── builder/        # Build worker (Docker, Fly.io)
+│   ├── builder/        # Build worker (Docker, containerd)
 │   ├── common/         # Shared types, config, errors
 │   ├── container/      # Container runtime abstraction
 │   ├── db/             # Database models & repositories
@@ -118,7 +107,7 @@ cp .env.example .env
 
 4. **Configure environment variables**
 
-Set GitHub OAuth, Fly.io, and encryption keys in `.env` (see Configuration section below)
+Set GitHub OAuth and encryption keys in `.env` (see Configuration section below)
 
 5. **Run database migrations**
 
@@ -166,7 +155,6 @@ Navigate to http://localhost:3000
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret |
 | `GITHUB_APP_ID` | GitHub App ID for repo access |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (PEM) |
-| `FLY_API_TOKEN` | Fly.io API token for deployments |
 
 ### Stripe (Billing)
 
@@ -195,17 +183,16 @@ openssl rand -base64 32
 
 ## Deployment
 
-### Production (Fly.io)
+### Production
 
 ```bash
-# API
+# API (Fly.io)
 fly deploy -c fly.api.toml
 
-# Proxy
-fly deploy -c fly.proxy.toml
+# Proxy / Builder / Code Runner → bare-metal (systemd)
+# See docs/baremetal/migration.md
 
-# Web
-fly deploy -c fly.web.toml
+# Frontend → Vercel (auto-deploy on push)
 ```
 
 ## MCP Proxy
