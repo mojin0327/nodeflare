@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useDeploymentWebSocket, DeploymentStatusUpdate, DeploymentStatus } from '@/hooks/use-websocket';
+import { useDeploymentWebSocket, DeploymentStatusUpdate } from '@/hooks/use-websocket';
+import type { DeploymentStatus } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface DeploymentProgressProps {

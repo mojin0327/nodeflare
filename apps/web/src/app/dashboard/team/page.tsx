@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Users, User, Plus, AlertCircle, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { findPlanLimits } from '@/lib/plans';
-import { TeamMember, AddMemberRequest, WorkspaceRole, getApiErrorCode, getApiErrorMessage } from '@/types';
+import { TeamMember, AddMemberRequest, WorkspaceRole, getApiErrorCode, getApiErrorMessage, PlanDetails } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,14 +22,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-interface PlanLimits {
-  max_team_members: number;
-}
-
-interface Plan {
-  plan: string;
-  limits: PlanLimits;
-}
 
 export default function TeamPage() {
   const t = useTranslations('team');
@@ -46,7 +38,7 @@ export default function TeamPage() {
     enabled: !!workspaceId,
   });
 
-  const { data: plans } = useQuery<Plan[]>({
+  const { data: plans } = useQuery<PlanDetails[]>({
     queryKey: ['billing-plans'],
     queryFn: () => api.get('/billing/plans'),
   });

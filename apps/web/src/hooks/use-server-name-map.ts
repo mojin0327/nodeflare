@@ -1,11 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-
-interface McpServerMinimal {
-  id: string;
-  name: string;
-}
+import { McpServerMinimal } from '@/types';
 
 export function useServerNameMap(workspaceId: string | undefined): Map<string, string> {
   const { data: servers } = useQuery<McpServerMinimal[]>({

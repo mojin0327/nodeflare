@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, KeyRound, Plus, Check, X, Search, ChevronDown } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, resolveApiError } from '@/lib/api';
 import { CreateAccessTokenRequest, CreateAccessTokenResponse, McpServerMinimal } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { Button } from '@/components/ui/button';
@@ -125,18 +125,7 @@ export default function NewAccessTokenPage() {
   const createErrorMessage = useMemo(() => {
     if (!createMutation.isError) return null;
     const error = createMutation.error as any;
-    const errorCode = error?.code;
-    if (errorCode) {
-      try {
-        const translated = tApiErrors(errorCode);
-        if (translated && translated !== errorCode) {
-          return translated;
-        }
-      } catch {
-        // Translation not found
-      }
-    }
-    return error?.message || tCommon('error');
+    return resolveApiError(error, tApiErrors, error?.message || tCommon('error'));
   }, [createMutation.isError, createMutation.error, tApiErrors, tCommon]);
 
   const handleSubmit = (e: React.FormEvent) => {

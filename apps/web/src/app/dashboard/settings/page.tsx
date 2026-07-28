@@ -8,17 +8,11 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getApiErrorMessage } from '@/types';
+import { getApiErrorMessage, NotificationSettings } from '@/types';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { Edit, LogOut, AlertTriangle, Trash2, AlertCircle, XCircle, Github, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
-interface NotificationSettings {
-  email_deploy_success: boolean;
-  email_deploy_failure: boolean;
-  email_server_down: boolean;
-  email_weekly_report: boolean;
-}
 
 export default function SettingsPage() {
   const t = useTranslations('settings');

@@ -8,12 +8,8 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle } from 'lucide-react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { BillingSubscription } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
-
-interface Subscription {
-  plan: string;
-  status: string;
-}
 
 export default function BillingSuccessPage() {
   const t = useTranslations('billing.success');
@@ -24,7 +20,7 @@ export default function BillingSuccessPage() {
   const { activeWorkspace: currentWorkspace } = useWorkspace();
 
   // Poll subscription status
-  const { data: subscription } = useQuery<Subscription>({
+  const { data: subscription } = useQuery<BillingSubscription>({
     queryKey: ['subscription-check', currentWorkspace?.id],
     queryFn: () => api.get(`/workspaces/${currentWorkspace?.id}/billing/subscription`),
     enabled: !!currentWorkspace?.id && !isComplete,

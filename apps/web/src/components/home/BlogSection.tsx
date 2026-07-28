@@ -5,15 +5,7 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { formatLocalizedDate } from '@/lib/date-utils';
-
-interface BlogPost {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt?: string;
-  publishDate?: string;
-  categories: { id: string; name: string }[];
-}
+import { BlogPost } from '@/lib/hygraph';
 
 export function BlogSection() {
   const t = useTranslations('home');

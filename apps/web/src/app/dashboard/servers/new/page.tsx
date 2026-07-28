@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Lock, Users, Globe, Server, Link, Search, Folder, AlertCircle, GitBranch, Terminal, AlertTriangle, XCircle, Plus, Trash2, KeyRound, Loader2, ChevronDown, ChevronRight, Key, Rocket } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, resolveApiError } from '@/lib/api';
 import { getLinkedAccounts, getRepos, getBranches, LinkedGitHubAccount, inspectRepo, RepoDetection } from '@/lib/github-api';
 import { CreateServerRequest, McpServer, Runtime, Visibility, GitHubRepo, UpstreamOAuthProvider, ServerTemplatePublic } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -461,18 +461,7 @@ export default function NewServerPage() {
   const errorMessage = useMemo(() => {
     if (!createMutation.isError) return null;
     const error = createMutation.error as any;
-    const errorCode = error?.code;
-    if (errorCode) {
-      try {
-        const translated = tApiErrors(errorCode);
-        if (translated && translated !== errorCode) {
-          return translated;
-        }
-      } catch {
-        // Translation not found
-      }
-    }
-    return error?.message || t('create.failed');
+    return resolveApiError(error, tApiErrors, error?.message || t('create.failed'));
   }, [createMutation.isError, createMutation.error, tApiErrors, t]);
 
   const errorSuggestion = useMemo(() => {

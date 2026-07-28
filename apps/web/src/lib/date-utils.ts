@@ -45,3 +45,22 @@ export function formatDateTime(date: Date | string | number): string {
     minute: '2-digit',
   });
 }
+
+export function getRelativeTime(dateStr: string | null | undefined, t: (key: string) => string): string {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '-';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffWeeks = Math.floor(diffDays / 7);
+
+  if (diffMins < 1) return t('detail.justNow');
+  if (diffMins < 60) return `${diffMins}${t('detail.minutesAgo')}`;
+  if (diffHours < 24) return `${diffHours}${t('detail.hoursAgo')}`;
+  if (diffDays < 7) return `${diffDays}${t('detail.daysAgo')}`;
+  return `${diffWeeks}${t('detail.weeksAgo')}`;
+}

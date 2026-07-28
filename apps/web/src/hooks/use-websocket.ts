@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ServerStatus } from '@/types';
+import type { ServerStatus, DeploymentStatus } from '@/types';
 
 // Constants
 const DEFAULT_RECONNECT_INTERVAL = 3000;
@@ -62,15 +62,6 @@ export interface ServerLogLine {
   level: 'debug' | 'info' | 'warn' | 'error';
   timestamp: string;
 }
-
-export type DeploymentStatus =
-  | 'pending'
-  | 'building'
-  | 'pushing'
-  | 'deploying'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled';
 
 export type WebSocketMessage =
   | { type: 'DeploymentStatus'; data: DeploymentStatusUpdate }

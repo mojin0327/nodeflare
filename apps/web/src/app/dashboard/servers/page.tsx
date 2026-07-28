@@ -4,7 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
 import { findPlanLimits } from '@/lib/plans';
-import { McpServerList } from '@/types';
+import { McpServerList, PlanDetails } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { mcpPublicUrl } from '@/lib/mcp-url';
 import Link from 'next/link';
@@ -14,12 +14,6 @@ import { SiNodedotjs, SiPython, SiGo, SiRust, SiDocker } from 'react-icons/si';
 import { Server, Plus, AlertCircle } from 'lucide-react';
 import { ServersPageSkeleton } from '../page-skeletons';
 
-interface Plan {
-  plan: string;
-  limits: {
-    max_servers: number;
-  };
-}
 
 export default function ServersPage() {
   const t = useTranslations('servers');
@@ -36,7 +30,7 @@ export default function ServersPage() {
       },
       {
         queryKey: ['billing-plans'],
-        queryFn: () => api.get<Plan[]>('/billing/plans'),
+        queryFn: () => api.get<PlanDetails[]>('/billing/plans'),
       },
     ],
   });

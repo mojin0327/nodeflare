@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, Aperture, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { OAuthApp } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { useServerNameMap } from '@/hooks/use-server-name-map';
 import { Button } from '@/components/ui/button';
@@ -22,16 +23,6 @@ import {
 import { formatSlashDate } from '@/lib/date-utils';
 import { useSetPageHeader } from '../../page-header';
 
-interface OAuthApp {
-  id: string;
-  client_id: string;
-  client_secret?: string;
-  client_name: string;
-  redirect_uris: string[];
-  server_id?: string;
-  scopes: string[];
-  created_at: string;
-}
 
 export default function OAuthAppsPage() {
   const t = useTranslations('oauth');

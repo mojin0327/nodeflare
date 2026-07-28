@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { AlertCircle, CreditCard, X, ArrowLeft, ChevronLeft, ChevronRight, Clock, Check } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, resolveApiError } from '@/lib/api';
+import { PlanDetails, BillingSubscription, PaymentMethod, BillingSettings, Invoice, SubscriptionHistory } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { UsageCard } from '@/components/billing/usage-card';
@@ -20,68 +21,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-interface Plan {
-  plan: string;
-  name: string;
-  description: string;
-  price_monthly_jpy: number | null;
-  price_yearly_jpy: number | null;
-  features: string[];
-  limits: {
-    max_servers: number;
-    max_deployments_per_month: number;
-    max_requests_per_month: number;
-    max_team_members: number;
-    log_retention_days: number;
-    custom_domains: boolean;
-    priority_support: boolean;
-    sso_enabled: boolean;
-  };
-}
-
-interface Subscription {
-  plan: string;
-  status: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  current_period_start: number | null;
-  current_period_end: number | null;
-  cancel_at_period_end: boolean;
-}
-
-interface PaymentMethod {
-  brand: string;
-  last4: string;
-  exp_month: number;
-  exp_year: number;
-}
-
-interface BillingSettings {
-  auto_email_invoices: boolean;
-}
-
-interface Invoice {
-  id: string;
-  number: string | null;
-  status: string | null;
-  amount_due: number;
-  amount_paid: number;
-  currency: string;
-  created: number;
-  hosted_invoice_url: string | null;
-  invoice_pdf: string | null;
-}
-
-interface SubscriptionHistory {
-  id: string;
-  plan: string;
-  status: string;
-  current_period_start: number;
-  current_period_end: number;
-  canceled_at: number | null;
-  ended_at: number | null;
-  cancel_at_period_end: boolean;
-}
 
 export default function BillingPage() {
   const t = useTranslations('billing');
@@ -100,12 +39,12 @@ export default function BillingPage() {
   const { activeWorkspace: currentWorkspace, isLoading: workspacesLoading } = useWorkspace();
   const workspacesError = false;
 
-  const { data: plans, isLoading: plansLoading, isError: plansError } = useQuery<Plan[]>({
+  const { data: plans, isLoading: plansLoading, isError: plansError } = useQuery<PlanDetails[]>({
     queryKey: ['billing-plans'],
     queryFn: () => api.get('/billing/plans'),
   });
 
-  const { data: subscription, isLoading: subscriptionLoading, isError: subscriptionError } = useQuery<Subscription>({
+  const { data: subscription, isLoading: subscriptionLoading, isError: subscriptionError } = useQuery<BillingSubscription>({
     queryKey: ['subscription', currentWorkspace?.id],
     queryFn: () => api.get(`/workspaces/${currentWorkspace?.id}/billing/subscription`),
     enabled: !!currentWorkspace?.id,
@@ -147,19 +86,7 @@ export default function BillingPage() {
   });
 
   const handleBillingError = (error: any) => {
-    const errorCode = error?.code;
-    if (errorCode) {
-      try {
-        const translated = tApiErrors(errorCode);
-        if (translated && translated !== errorCode) {
-          setBillingError(translated);
-          return;
-        }
-      } catch {
-        // Translation not found
-      }
-    }
-    setBillingError(error?.message || tCommon('error'));
+    setBillingError(resolveApiError(error, tApiErrors, error?.message || tCommon('error')));
   };
 
   const checkoutMutation = useMutation({

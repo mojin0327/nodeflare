@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { api } from '@/lib/api';
-import { McpServer, Deployment, Secret, AccessMode, UpstreamOAuthProvider, ServerTemplate, PublishTemplateRequest } from '@/types';
+import { api, resolveApiError } from '@/lib/api';
+import { McpServer, Deployment, Secret, AccessMode, UpstreamOAuthProvider, ServerTemplate, PublishTemplateRequest, DeploymentUsage, Webhook as WebhookType, HealthCheckResponse, ExecuteToolResponse, MetricDataPoint, AppMetrics } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,7 +46,7 @@ import {
 import { useSetPageHeader } from '../../page-header';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { mcpPublicUrl } from '@/lib/mcp-url';
-import { formatDateTime } from '@/lib/date-utils';
+import { formatDateTime, getRelativeTime } from '@/lib/date-utils';
 
 // Static status colors - moved outside component to prevent recreation
 const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -67,30 +67,6 @@ const DEPLOYMENT_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending: { bg: 'bg-gray-100', text: 'text-gray-700' },
 };
 
-// Relative time formatter - moved outside to prevent recreation
-function getRelativeTime(dateStr: string | null | undefined, t: (key: string) => string): string {
-  if (!dateStr) return '-';
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return '-';
-
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-  const diffWeeks = Math.floor(diffDays / 7);
-
-  if (diffMins < 1) return t('detail.justNow');
-  if (diffMins < 60) return `${diffMins}${t('detail.minutesAgo')}`;
-  if (diffHours < 24) return `${diffHours}${t('detail.hoursAgo')}`;
-  if (diffDays < 7) return `${diffDays}${t('detail.daysAgo')}`;
-  return `${diffWeeks}${t('detail.weeksAgo')}`;
-}
-
-interface DeploymentUsage {
-  deployments_this_month: number;
-  max_deployments: number;
-}
 
 export default function ServerDetailPage() {
   const t = useTranslations('servers');
@@ -247,20 +223,7 @@ export default function ServerDetailPage() {
         deploymentToastIdRef.current = null;
       }
       pendingDeploymentIdRef.current = null;
-      const errorCode = error?.code;
-      if (errorCode) {
-        try {
-          const translated = tApiErrors(errorCode);
-          if (translated && translated !== errorCode) {
-            setDeployError(translated);
-            toast.error(translated);
-            return;
-          }
-        } catch {
-          // Translation not found
-        }
-      }
-      const errorMsg = error?.message || tCommon('error');
+      const errorMsg = resolveApiError(error, tApiErrors, error?.message || tCommon('error'));
       setDeployError(errorMsg);
       toast.error(errorMsg);
     },
@@ -285,17 +248,7 @@ export default function ServerDetailPage() {
       if (context?.previous) {
         queryClient.setQueryData(SERVERS_LIST_KEY, context.previous);
       }
-      let message = error?.message || tCommon('error');
-      const errorCode = error?.code;
-      if (errorCode) {
-        try {
-          const translated = tApiErrors(errorCode);
-          if (translated && translated !== errorCode) message = translated;
-        } catch {
-          // Translation not found
-        }
-      }
-      toast.error(message);
+      toast.error(resolveApiError(error, tApiErrors, error?.message || tCommon('error')));
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: SERVERS_LIST_KEY });
@@ -309,18 +262,12 @@ export default function ServerDetailPage() {
     enabled: !!workspaceId && !!serverId,
   });
 
-  // Fetch secrets so user can pick required env var keys
-  const { data: serverSecrets = [] } = useQuery<Secret[]>({
-    queryKey: ['secrets', workspaceId, serverId],
-    queryFn: () => api.get<Secret[]>(`/workspaces/${workspaceId}/servers/${serverId}/secrets`),
-    enabled: !!workspaceId && !!serverId && shareDialogOpen,
-  });
-
   // Auto-select all secrets when opening the dialog for a brand-new template
   useEffect(() => {
+    const serverSecrets = secrets ?? [];
     if (!shareDialogOpen || existingTemplate || serverSecrets.length === 0) return;
     setShareSelectedKeys(serverSecrets.map((s) => s.key));
-  }, [shareDialogOpen, serverSecrets, existingTemplate]);
+  }, [shareDialogOpen, secrets, existingTemplate]);
 
   const publishTemplateMutation = useMutation({
     mutationFn: (body: PublishTemplateRequest) =>
@@ -600,11 +547,11 @@ export default function ServerDetailPage() {
               <div>
                 <Label className="text-xs font-medium text-gray-700">{t('detail.shareEnvVarKeys')}</Label>
                 <p className="text-xs text-gray-400 mt-0.5 mb-2">{t('detail.shareEnvVarKeysHint')}</p>
-                {serverSecrets.length === 0 ? (
+                {(secrets ?? []).length === 0 ? (
                   <p className="text-xs text-gray-400 italic">No secrets found on this server.</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {serverSecrets.map((s) => {
+                    {(secrets ?? []).map((s) => {
                       const selected = shareSelectedKeys.includes(s.key);
                       return (
                         <button
@@ -997,28 +944,6 @@ function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, select
   );
 }
 
-interface HealthCheckResponse {
-  status: string;
-  endpoint_url: string | null;
-  connection: {
-    reachable: boolean;
-    latency_ms: number | null;
-    mcp_version: string | null;
-  };
-  tools: Array<{
-    name: string;
-    description: string | null;
-    input_schema: Record<string, unknown> | null;
-  }> | null;
-  error: string | null;
-}
-
-interface ExecuteToolResponse {
-  success: boolean;
-  result: unknown;
-  error: string | null;
-  latency_ms: number;
-}
 
 function TestTab({
   serverId,
@@ -1087,22 +1012,10 @@ function TestTab({
       setExecuteResult(data);
     },
     onError: (error: any) => {
-      // Try to translate error code if available
-      let errorMessage = error.message;
-      if (error.code) {
-        try {
-          const translated = tApiErrors(error.code);
-          if (translated && translated !== error.code) {
-            errorMessage = translated;
-          }
-        } catch {
-          // Translation not found
-        }
-      }
       setExecuteResult({
         success: false,
         result: null,
-        error: errorMessage,
+        error: resolveApiError(error, tApiErrors, error?.message),
         latency_ms: 0,
       });
     },
@@ -2070,18 +1983,6 @@ function SettingsTab({
   );
 }
 
-interface Webhook {
-  id: string;
-  name: string;
-  webhook_url: string;
-  webhook_type: string;
-  events: string[];
-  is_active: boolean;
-  last_triggered_at: string | null;
-  last_status: string | null;
-  created_at: string;
-}
-
 function WebhooksTab({
   serverId,
   workspaceId,
@@ -2104,7 +2005,7 @@ function WebhooksTab({
     secret: '',
   });
 
-  const { data: webhooks = [], isLoading } = useQuery<Webhook[]>({
+  const { data: webhooks = [], isLoading } = useQuery<WebhookType[]>({
     queryKey: ['webhooks', serverId],
     queryFn: () => api.get(`/workspaces/${workspaceId}/servers/${serverId}/webhooks`),
   });
@@ -2147,7 +2048,7 @@ function WebhooksTab({
   });
 
   // Async test function - allows parallel testing with toast notifications
-  const handleTestWebhook = useCallback(async (webhook: Webhook) => {
+  const handleTestWebhook = useCallback(async (webhook: WebhookType) => {
     const webhookId = webhook.id;
     const webhookName = webhook.name;
 
@@ -2421,20 +2322,6 @@ function WebhooksTab({
       ) : null}
     </div>
   );
-}
-
-interface MetricDataPoint {
-  timestamp: number;
-  value: number;
-  instance?: string;
-}
-
-interface AppMetrics {
-  memory_used: MetricDataPoint[];
-  memory_total: MetricDataPoint[];
-  cpu_usage: MetricDataPoint[];
-  network_rx: MetricDataPoint[];
-  network_tx: MetricDataPoint[];
 }
 
 function MetricsTab({ serverId, workspaceId, serverStatus, t }: { serverId: string; workspaceId: string; serverStatus: string; t: (key: string) => string }) {

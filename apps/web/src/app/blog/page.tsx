@@ -3,15 +3,7 @@ import { Header, Footer } from '@/components/layout';
 import Link from 'next/link';
 import { getTranslations, getLocale } from 'next-intl/server';
 import { formatLocalizedDate } from '@/lib/date-utils';
-
-interface BlogPost {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt?: string;
-  publishDate?: string;
-  categories: { id: string; name: string }[];
-}
+import { BlogPost } from '@/lib/hygraph';
 
 // Map next-intl locale to Hygraph locales with fallback
 function toHygraphLocales(locale: string): string[] {

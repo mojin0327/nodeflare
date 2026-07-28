@@ -3,23 +3,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { Announcement } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { Info, Plus, Edit, Trash2 } from 'lucide-react';
 
-interface Announcement {
-  id: string;
-  title: string;
-  content: string | null;
-  type: string;
-  is_active: boolean;
-  published_at: string;
-  expires_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 interface CreateAnnouncementData {
   title: string;

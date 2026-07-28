@@ -4,15 +4,10 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { api } from '@/lib/api';
+import { OAuthClientInfo } from '@/types';
 import { useAuth } from '@/hooks/use-auth';
 import { SquareLoader } from '@/components/ui/square-loader';
 import { isSafeRedirectUri } from '@/lib/safe-redirect';
-
-interface ClientInfo {
-  client_id: string;
-  client_name: string;
-  scopes: string[];
-}
 
 function scopeLabel(scope: string): string {
   if (scope === '*') return 'Full access to your account and MCP servers';
@@ -23,7 +18,7 @@ function ConsentInner() {
   const sp = useSearchParams();
   const { refreshUser } = useAuth();
   const [phase, setPhase] = useState<'loading' | 'consent' | 'submitting' | 'error'>('loading');
-  const [client, setClient] = useState<ClientInfo | null>(null);
+  const [client, setClient] = useState<OAuthClientInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const clientId = sp.get('client_id') || '';
@@ -57,7 +52,7 @@ function ConsentInner() {
         return;
       }
       try {
-        const info = await api.get<ClientInfo>(
+        const info = await api.get<OAuthClientInfo>(
           `/oauth/client-info?client_id=${encodeURIComponent(clientId)}`,
         );
         if (cancelled) return;

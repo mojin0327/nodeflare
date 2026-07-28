@@ -180,3 +180,19 @@ export class ApiError extends Error {
 }
 
 export const api = new ApiClient();
+
+/** Translate an API error code via next-intl's tApiErrors, falling back to error.message or the given fallback. */
+export function resolveApiError(
+  error: unknown,
+  tApiErrors: (key: string) => string,
+  fallback: string,
+): string {
+  const code = (error as ApiError | null)?.code;
+  if (code) {
+    try {
+      const msg = tApiErrors(code);
+      if (msg && msg !== code) return msg;
+    } catch {}
+  }
+  return (error as ApiError | null)?.message || fallback;
+}

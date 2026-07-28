@@ -6,8 +6,8 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, Aperture, Plus, Check, X, Search, ChevronDown } from 'lucide-react';
-import { api } from '@/lib/api';
-import { McpServerMinimal } from '@/types';
+import { api, resolveApiError } from '@/lib/api';
+import { McpServerMinimal, OAuthApp } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,16 +16,6 @@ import { useSetPageHeader } from '../../../page-header';
 
 const COPY_FEEDBACK_DURATION_MS = 2000;
 
-interface OAuthApp {
-  id: string;
-  client_id: string;
-  client_secret?: string;
-  client_name: string;
-  redirect_uris: string[];
-  server_id?: string;
-  scopes: string[];
-  created_at: string;
-}
 
 export default function NewOAuthAppPage() {
   const t = useTranslations('oauth');
@@ -138,18 +128,7 @@ export default function NewOAuthAppPage() {
   const createErrorMessage = useMemo(() => {
     if (!createMutation.isError) return null;
     const error = createMutation.error as any;
-    const errorCode = error?.code;
-    if (errorCode) {
-      try {
-        const translated = tApiErrors(errorCode);
-        if (translated && translated !== errorCode) {
-          return translated;
-        }
-      } catch {
-        // Translation not found
-      }
-    }
-    return error?.message || tCommon('error');
+    return resolveApiError(error, tApiErrors, error?.message || tCommon('error'));
   }, [createMutation.isError, createMutation.error, tApiErrors, tCommon]);
 
   const handleSubmit = (e: React.FormEvent) => {

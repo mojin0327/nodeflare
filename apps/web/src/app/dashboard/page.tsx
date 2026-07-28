@@ -3,7 +3,7 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
-import { McpServerBasic } from '@/types';
+import { McpServerBasic, PlanDetails, Announcement, BatchStatsResponse } from '@/types';
 import { useWorkspace } from '@/hooks/use-workspace';
 import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import Link from 'next/link';
@@ -12,14 +12,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Plus, AlertCircle, ChevronRight, Play } from 'lucide-react';
 import { DashboardPageSkeleton } from './page-skeletons';
-
-interface BatchStatsResponse {
-  servers: {
-    server_id: string;
-    total_requests: number;
-    error_count: number;
-  }[];
-}
 
 // Constants
 const STATS_STALE_TIME_MS = 60 * 1000; // 1 minute
@@ -44,14 +36,6 @@ function formatDate(dateStr: string): string {
   return dateStr.split('T')[0];
 }
 
-interface Plan {
-  plan: string;
-  limits: {
-    max_servers: number;
-    max_deployments_per_month: number;
-    max_requests_per_month: number;
-  };
-}
 
 export default function DashboardPage() {
   const t = useTranslations('dashboard');
@@ -71,7 +55,7 @@ export default function DashboardPage() {
       },
       {
         queryKey: ['billing-plans'],
-        queryFn: () => api.get<Plan[]>('/billing/plans'),
+        queryFn: () => api.get<PlanDetails[]>('/billing/plans'),
       },
     ],
   });
@@ -279,14 +263,6 @@ function ServerStatusRow({
       </div>
     </Link>
   );
-}
-
-interface Announcement {
-  id: string;
-  title: string;
-  content?: string;
-  type: string;
-  published_at: string;
 }
 
 interface BlogPost {

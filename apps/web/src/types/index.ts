@@ -346,6 +346,183 @@ export interface RequestLogStats {
   avg_duration_ms: number;
 }
 
+export interface OAuthApp {
+  id: string;
+  client_id: string;
+  client_secret?: string;
+  client_name: string;
+  redirect_uris: string[];
+  server_id?: string;
+  scopes: string[];
+  created_at: string;
+}
+
+/** Full plan details as returned by GET /billing/plans */
+export interface PlanDetails {
+  plan: string;
+  name: string;
+  description: string;
+  price_monthly_jpy: number | null;
+  price_yearly_jpy: number | null;
+  features: string[];
+  limits: {
+    max_servers: number;
+    max_deployments_per_month: number;
+    max_requests_per_month: number;
+    max_team_members: number;
+    log_retention_days: number;
+    custom_domains: boolean;
+    priority_support: boolean;
+    sso_enabled: boolean;
+  };
+}
+
+export interface BillingSubscription {
+  plan: string;
+  status: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  current_period_start: number | null;
+  current_period_end: number | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface PaymentMethod {
+  brand: string;
+  last4: string;
+  exp_month: number;
+  exp_year: number;
+}
+
+export interface BillingSettings {
+  auto_email_invoices: boolean;
+}
+
+export interface Invoice {
+  id: string;
+  number: string | null;
+  status: string | null;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  created: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+}
+
+export interface SubscriptionHistory {
+  id: string;
+  plan: string;
+  status: string;
+  current_period_start: number;
+  current_period_end: number;
+  canceled_at: number | null;
+  ended_at: number | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string | null;
+  type: string;
+  is_active: boolean;
+  published_at: string;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type LoadingType = 'github' | 'google' | 'email' | null;
+
+export interface WireGuardPeer {
+  name: string;
+  region: string;
+  peer_ip: string;
+}
+
+export interface WireGuardConfig {
+  peer_name: string;
+  config_file: string;
+  peer_ip: string;
+  instructions: string[];
+}
+
+export interface NotificationSettings {
+  email_deploy_success: boolean;
+  email_deploy_failure: boolean;
+  email_server_down: boolean;
+  email_weekly_report: boolean;
+}
+
+export interface OAuthClientInfo {
+  client_id: string;
+  client_name: string;
+  scopes: string[];
+}
+
+export interface BatchStatsResponse {
+  servers: {
+    server_id: string;
+    total_requests: number;
+    error_count: number;
+  }[];
+}
+
+export interface DeploymentUsage {
+  deployments_this_month: number;
+  max_deployments: number;
+}
+
+export interface Webhook {
+  id: string;
+  name: string;
+  webhook_url: string;
+  webhook_type: string;
+  events: string[];
+  is_active: boolean;
+  last_triggered_at: string | null;
+  last_status: string | null;
+  created_at: string;
+}
+
+export interface HealthCheckResponse {
+  status: string;
+  endpoint_url: string | null;
+  connection: {
+    reachable: boolean;
+    latency_ms: number | null;
+    mcp_version: string | null;
+  };
+  tools: Array<{
+    name: string;
+    description: string | null;
+    input_schema: Record<string, unknown> | null;
+  }> | null;
+  error: string | null;
+}
+
+export interface ExecuteToolResponse {
+  success: boolean;
+  result: unknown;
+  error: string | null;
+  latency_ms: number;
+}
+
+export interface MetricDataPoint {
+  timestamp: number;
+  value: number;
+  instance?: string;
+}
+
+export interface AppMetrics {
+  memory_used: MetricDataPoint[];
+  memory_total: MetricDataPoint[];
+  cpu_usage: MetricDataPoint[];
+  network_rx: MetricDataPoint[];
+  network_tx: MetricDataPoint[];
+}
+
 export interface ToolUsageStats {
   tool_name: string;
   call_count: number;
