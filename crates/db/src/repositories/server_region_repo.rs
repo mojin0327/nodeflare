@@ -479,6 +479,29 @@ impl RegionUsageRepository {
         Ok(())
     }
 
+    /// Mark a batch of usage records as reported in a single UPDATE.
+    pub async fn mark_reported_batch(
+        pool: &PgPool,
+        usage_ids: &[Uuid],
+        stripe_usage_record_id: &str,
+    ) -> Result<()> {
+        if usage_ids.is_empty() {
+            return Ok(());
+        }
+        sqlx::query(
+            r#"
+            UPDATE region_usage
+            SET reported_to_stripe = true, stripe_usage_record_id = $2, updated_at = NOW()
+            WHERE id = ANY($1)
+            "#,
+        )
+        .bind(usage_ids)
+        .bind(stripe_usage_record_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     /// Get total additional region count for current period
     pub async fn get_current_period_region_count(
         pool: &PgPool,

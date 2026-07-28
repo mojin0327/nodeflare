@@ -27,6 +27,19 @@ impl WorkspaceRepository {
         Ok(workspace)
     }
 
+    pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Workspace>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let workspaces = sqlx::query_as::<_, Workspace>(
+            &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE id = ANY($1)"),
+        )
+        .bind(ids)
+        .fetch_all(pool)
+        .await?;
+        Ok(workspaces)
+    }
+
     pub async fn find_by_slug(pool: &PgPool, slug: &str) -> Result<Option<Workspace>> {
         let workspace = sqlx::query_as::<_, Workspace>(
             &format!("SELECT {WORKSPACE_COLS} FROM workspaces WHERE slug = $1"),

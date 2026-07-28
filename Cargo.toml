@@ -107,6 +107,9 @@ bollard = "0.18"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 
+# Concurrent collections
+dashmap = "6"
+
 # Bytes
 bytes = "1.9"
 

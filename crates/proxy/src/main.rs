@@ -43,19 +43,27 @@ use redis_cache::{RedisCache, CachedServer, CodeExecContext};
 /// (forward_request error, auth failure, etc.).  Without this guard the counter
 /// would drift upward on any error, causing every subsequent request to look
 /// concurrent and always fork — breaking the fork-vs-direct decision.
+///
+/// Uses DashMap so concurrent requests for *different* servers never contend
+/// on the same lock shard.
 struct ActiveRequestGuard<'a> {
-    map: &'a std::sync::Mutex<std::collections::HashMap<uuid::Uuid, usize>>,
+    map: &'a dashmap::DashMap<uuid::Uuid, usize>,
     server_id: uuid::Uuid,
 }
 
 impl<'a> Drop for ActiveRequestGuard<'a> {
     fn drop(&mut self) {
-        let mut map = self.map.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(c) = map.get_mut(&self.server_id) {
-            *c = c.saturating_sub(1);
-            if *c == 0 {
-                map.remove(&self.server_id);
+        use dashmap::mapref::entry::Entry;
+        match self.map.entry(self.server_id) {
+            Entry::Occupied(mut e) => {
+                let v = e.get().saturating_sub(1);
+                if v == 0 {
+                    e.remove();
+                } else {
+                    *e.get_mut() = v;
+                }
             }
+            Entry::Vacant(_) => {}
         }
     }
 }
@@ -89,13 +97,15 @@ pub struct ProxyState {
     pub builder_internal_url: Option<String>,
     /// Bearer token for authenticating to Builder internal API.
     pub builder_token: Option<String>,
-    /// In-process throttle for `last_request` Redis writes (60 s window).
+    /// In-process throttle for `last_request` Redis writes (120 s window by default).
     /// Avoids a Redis SET on every single request; scale-to-zero only needs
-    /// minute-level precision, so one write per minute per server is enough.
-    pub last_request_throttle: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, std::time::Instant>>,
+    /// minute-level precision, so one write per server per window is enough.
+    /// DashMap: requests for different servers never contend on the same lock shard.
+    pub last_request_throttle: dashmap::DashMap<uuid::Uuid, std::time::Instant>,
     /// Per-server in-flight request counter for fork decisions.
     /// Incremented when a request starts forwarding, decremented on completion.
-    pub active_requests: std::sync::Mutex<std::collections::HashMap<uuid::Uuid, usize>>,
+    /// DashMap: requests for different servers never contend on the same lock shard.
+    pub active_requests: dashmap::DashMap<uuid::Uuid, usize>,
     /// Path to the builder's Unix socket for fork VM lifecycle management.
     /// When set, fork requests go through the socket (OS-guaranteed cleanup on crash).
     /// When None, falls back to the HTTP kill-fork API.
@@ -255,8 +265,8 @@ async fn main() -> Result<()> {
         meta_tools,
         builder_internal_url,
         builder_token,
-        last_request_throttle: std::sync::Mutex::new(std::collections::HashMap::new()),
-        active_requests: std::sync::Mutex::new(std::collections::HashMap::new()),
+        last_request_throttle: dashmap::DashMap::new(),
+        active_requests: dashmap::DashMap::new(),
         fork_socket_path,
     });
 
@@ -676,15 +686,13 @@ async fn proxy_handler(
             std::time::Duration::from_secs(secs)
         });
         let should_write = {
-            let mut map = state
-                .last_request_throttle
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
             let now = std::time::Instant::now();
-            match map.get(&server.id) {
+            // DashMap: each server_id hits at most one shard, so concurrent
+            // requests for different servers never block each other here.
+            match state.last_request_throttle.get(&server.id) {
                 Some(t) if t.elapsed() < throttle => false,
                 _ => {
-                    map.insert(server.id, now);
+                    state.last_request_throttle.insert(server.id, now);
                     true
                 }
             }
@@ -755,10 +763,9 @@ async fn proxy_handler(
     // other ? unwinds the stack.  Previously the decrement was done manually
     // after forward_request, which was silently skipped on error paths.
     let concurrent = {
-        let mut map = state.active_requests.lock().unwrap_or_else(|p| p.into_inner());
-        let count = map.entry(server.id).or_insert(0);
-        *count += 1;
-        *count > 1
+        let mut entry = state.active_requests.entry(server.id).or_insert(0);
+        *entry += 1;
+        *entry > 1
     };
     let _active_guard = ActiveRequestGuard {
         map: &state.active_requests,
@@ -1341,7 +1348,7 @@ async fn forward_request(
     let is_sse = method == axum::http::Method::GET || is_sse_request(&inbound_headers);
 
     // Sanitize headers once (hop-by-hop strip, Authorization policy, X-Forwarded-*).
-    let mut headers = build_upstream_headers(&inbound_headers, fwd);
+    let headers = build_upstream_headers(&inbound_headers, fwd);
 
     // Read body (limit comes from configuration, not a hard-coded constant).
     let mut body_bytes = axum::body::to_bytes(request.into_body(), state.body_limit)

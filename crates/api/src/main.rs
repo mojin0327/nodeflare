@@ -436,7 +436,7 @@ fn start_usage_reporting_task(db_pool: mcp_db::DbPool, billing: Option<mcp_billi
         loop {
             interval.tick().await;
 
-            let workspaces = match RegionUsageRepository::list_unreported_workspaces(&db_pool).await {
+            let ws_ids = match RegionUsageRepository::list_unreported_workspaces(&db_pool).await {
                 Ok(w) => w,
                 Err(e) => {
                     tracing::error!("usage reporting: failed to list workspaces: {}", e);
@@ -444,8 +444,18 @@ fn start_usage_reporting_task(db_pool: mcp_db::DbPool, billing: Option<mcp_billi
                 }
             };
 
-            for ws_id in workspaces {
-                let Ok(Some(ws)) = WorkspaceRepository::find_by_id(&db_pool, ws_id).await else {
+            // Batch-fetch all workspace rows in one query instead of N individual lookups.
+            let workspace_map: std::collections::HashMap<uuid::Uuid, _> =
+                match WorkspaceRepository::find_by_ids(&db_pool, &ws_ids).await {
+                    Ok(ws) => ws.into_iter().map(|w| (w.id, w)).collect(),
+                    Err(e) => {
+                        tracing::error!("usage reporting: failed to batch-fetch workspaces: {}", e);
+                        continue;
+                    }
+                };
+
+            for ws_id in ws_ids {
+                let Some(ws) = workspace_map.get(&ws_id) else {
                     continue;
                 };
                 // Only paid plans are usage-billed; Free is flat-capped.
@@ -499,14 +509,15 @@ fn start_usage_reporting_task(db_pool: mcp_db::DbPool, billing: Option<mcp_billi
                     .await
                 {
                     Ok(record_id) => {
-                        for r in &rows {
-                            if let Err(e) =
-                                RegionUsageRepository::mark_reported(&db_pool, r.id, &record_id).await
-                            {
-                                tracing::error!("usage reporting: mark_reported failed: {}", e);
-                            }
+                        // Single batch UPDATE instead of N individual queries.
+                        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id).collect();
+                        if let Err(e) =
+                            RegionUsageRepository::mark_reported_batch(&db_pool, &ids, &record_id).await
+                        {
+                            tracing::error!("usage reporting: mark_reported_batch failed: {}", e);
+                        } else {
+                            tracing::info!("Reported {} GB-hours for workspace {}", quantity, ws_id);
                         }
-                        tracing::info!("Reported {} GB-hours for workspace {}", quantity, ws_id);
                     }
                     Err(e) => {
                         tracing::error!("usage reporting: report_meter_usage failed for {}: {}", ws_id, e);
