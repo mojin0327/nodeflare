@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use mcp_common::types::RequestLogResponse;
-use mcp_db::{RequestLogRepository, RequestLogStats, ServerRepository, ToolUsageStats, WorkspaceRepository};
+use mcp_db::{RequestLogRepository, RequestLogStats, ToolUsageStats, WorkspaceRepository};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;

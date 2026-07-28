@@ -112,30 +112,6 @@ impl ApiCache {
             .await;
     }
 
-    /// Invalidate all workspace caches (useful for bulk operations)
-    /// Publish cache invalidation event for multi-instance deployments
-    /// Scalability: Other instances subscribe to this channel and invalidate their local caches
-    pub async fn publish_cache_invalidation(&self, workspace_id: Uuid) {
-        let channel = "cache:invalidate:workspace";
-        let message = workspace_id.to_string();
-
-        let result: Result<i64, _> = self.client.publish(channel, message).await;
-
-        if let Err(e) = result {
-            tracing::error!("Failed to publish cache invalidation: {}", e);
-        }
-    }
-
-    /// Invalidate workspace cache and notify other instances
-    /// Scalability: Combines local invalidation with Pub/Sub notification
-    pub async fn invalidate_workspace_with_broadcast(&self, workspace_id: Uuid) {
-        // Local invalidation
-        self.invalidate_workspace_info(workspace_id).await;
-
-        // Notify other instances
-        self.publish_cache_invalidation(workspace_id).await;
-    }
-
     // =====================================================================
     // Deployment count caching
     // =====================================================================

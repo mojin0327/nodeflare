@@ -264,7 +264,6 @@ fn start_upstream_token_refresh_task(db_pool: mcp_db::DbPool, http: reqwest::Cli
 
                 #[derive(serde::Deserialize)]
                 struct StoredToken {
-                    access_token: String,
                     refresh_token: String,
                     expires_at: i64,
                 }

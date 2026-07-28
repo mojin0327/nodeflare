@@ -26,8 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
-# Docker (bollard used by docker.rs utilities; tar/flate2 used in containerd build context)
-bollard.workspace = true
+# Archive utilities used in build context extraction
 tar = "0.4"
 flate2 = "1.0"
 

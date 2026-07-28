@@ -304,12 +304,6 @@ pub async fn kill_fork(fork_container: &str, base_container: &str) {
     tracing::info!("firecracker: fork {} killed and cleaned up", fork_container);
 }
 
-/// Returns true if a full snapshot exists for `container_name`.
-pub fn snapshot_exists(container_name: &str) -> bool {
-    let dir = snapshot_dir(container_name);
-    dir.join("snapshot.bin").exists() && dir.join("memory.bin").exists()
-}
-
 /// Kill a running VM and clean up TAP / iptables. Rootfs and snapshot are kept.
 pub async fn kill(container_name: &str) -> Result<()> {
     let host_port = derive_host_port(container_name);

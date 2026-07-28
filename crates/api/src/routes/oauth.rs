@@ -4,7 +4,6 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Form, Json,
 };
-use fred::interfaces::KeysInterface;
 use std::net::SocketAddr;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};

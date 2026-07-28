@@ -14,15 +14,7 @@ use crate::state::AppState;
 use crate::routes::helpers::{ERR_NOT_A_MEMBER, ERR_WORKSPACE_NOT_FOUND};
 
 #[derive(Debug, Deserialize)]
-pub struct CreateWireGuardRequest {
-    pub name: String,
-    #[serde(default = "default_region")]
-    pub region: String,
-}
-
-fn default_region() -> String {
-    "nrt".to_string()
-}
+pub struct CreateWireGuardRequest {}
 
 #[derive(Debug, Serialize)]
 pub struct WireGuardPeerResponse {

@@ -784,14 +784,6 @@ pub(crate) enum NodePm {
 }
 
 impl NodePm {
-    /// The `run` prefix used to invoke package scripts (`npm run` / `pnpm run`).
-    fn runner(self) -> &'static str {
-        match self {
-            NodePm::Npm => "npm run",
-            NodePm::Pnpm => "pnpm run",
-        }
-    }
-
     /// Map to the shared detector's package-manager enum, so entry detection uses the
     /// single shared rule (crates/detect). Only npm/pnpm are distinguished here.
     fn to_shared(self) -> mcp_detect::parse::NodePm {

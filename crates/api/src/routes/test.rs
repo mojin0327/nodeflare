@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::error::db_error;
 use crate::extractors::AuthUser;
 use crate::state::AppState;
-use crate::routes::helpers::{fetch_server_for_workspace, ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER, ERR_SERVER_NOT_FOUND};
+use crate::routes::helpers::{fetch_server_for_workspace, ERR_INSUFFICIENT_PERMISSIONS, ERR_NOT_A_MEMBER};
 
 /// JSON-RPC request structure
 #[derive(Debug, Serialize)]

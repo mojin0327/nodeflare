@@ -34,7 +34,6 @@ struct TokenResponse {
     expires_in: u64,
     #[allow(dead_code)]
     scope: Option<String>,
-    id_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -63,7 +63,6 @@ pub struct ForkLease {
     _conn: tokio::net::unix::OwnedWriteHalf,
     pub port: u16,
     pub fork_name: String,
-    pub base_name: String,
 }
 
 /// Connect and request a fork VM for `base`.
@@ -90,7 +89,6 @@ pub async fn request_fork(socket_path: &str, base: &str) -> anyhow::Result<ForkL
         _conn: write_half,
         port,
         fork_name,
-        base_name: base.to_string(),
     })
 }
 

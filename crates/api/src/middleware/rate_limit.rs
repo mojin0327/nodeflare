@@ -182,8 +182,6 @@ pub struct RateLimitConfig {
     pub window_secs: u64,
     /// Key prefix for Redis
     pub key_prefix: String,
-    /// Burst limit (additional requests allowed in short bursts)
-    pub burst_limit: i64,
 }
 
 impl Default for RateLimitConfig {
@@ -200,23 +198,7 @@ impl Default for RateLimitConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(60),
             key_prefix: "rate_limit:".to_string(),
-            // Allow burst of additional requests for traffic spikes
-            burst_limit: std::env::var("RATE_LIMIT_BURST")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(100),
         }
-    }
-}
-
-/// Plan-based rate limit configuration
-/// Returns (max_requests_per_minute, burst_limit) for each plan
-pub fn get_plan_rate_limits(plan: &str) -> (i64, i64) {
-    match plan {
-        "enterprise" => (100_000, 10_000), // 100K/min with 10K burst
-        "team" => (10_000, 1_000),         // 10K/min with 1K burst
-        "pro" => (5_000, 500),             // 5K/min with 500 burst
-        _ => (1_000, 100),                 // Free: 1K/min with 100 burst
     }
 }
 

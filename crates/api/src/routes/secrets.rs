@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use mcp_common::types::{SecretResponse, SetSecretRequest};
-use mcp_db::{CreateSecret, SecretRepository, ServerRepository, WorkspaceRepository};
+use mcp_db::{CreateSecret, SecretRepository, WorkspaceRepository};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::sync::Arc;
