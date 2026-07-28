@@ -524,9 +524,11 @@ fn merge_hints(acc: &mut manifest::ManifestHints, next: manifest::ManifestHints)
 
 /// Union env vars from the three signal tiers by key, richest metadata winning.
 fn merge_env(manifest: Vec<EnvVar>, example: Vec<String>, scanned: Vec<String>) -> Vec<EnvVar> {
+    // Build a HashSet upfront so duplicate checks are O(1) instead of O(n) per key.
+    let mut seen: std::collections::HashSet<String> = manifest.iter().map(|e| e.key.clone()).collect();
     let mut out = manifest;
     for key in example.into_iter().chain(scanned) {
-        if !out.iter().any(|e| e.key == key) {
+        if seen.insert(key.clone()) {
             let secret = {
                 let k = key.to_ascii_lowercase();
                 k.contains("key") || k.contains("token") || k.contains("secret") || k.contains("password")

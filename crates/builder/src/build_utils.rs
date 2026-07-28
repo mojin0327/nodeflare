@@ -8,6 +8,28 @@ use std::path::Path;
 /// by the token-shape patterns below when they look like credentials.
 const MIN_REDACTED_SECRET_LEN: usize = 4;
 
+/// Case-insensitive ASCII prefix check for Dockerfile keyword matching.
+///
+/// Replaces the `s.to_uppercase().starts_with("KEYWORD")` pattern:
+/// `to_uppercase()` allocates a new String per call; this function uses
+/// byte-level `eq_ignore_ascii_case` with zero allocation.
+/// Correct for all Dockerfile keywords (guaranteed ASCII).
+#[inline]
+fn starts_with_keyword(s: &str, keyword: &str) -> bool {
+    s.len() >= keyword.len()
+        && s.as_bytes()[..keyword.len()].eq_ignore_ascii_case(keyword.as_bytes())
+}
+
+/// Case-insensitive ASCII substring check for Dockerfile keyword matching.
+///
+/// Same zero-allocation benefit as `starts_with_keyword`, used for
+/// `s.to_uppercase().contains("NEEDLE")` patterns.
+#[inline]
+fn contains_keyword(s: &str, needle: &str) -> bool {
+    let n = needle.len();
+    n <= s.len() && s.as_bytes().windows(n).any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 /// Regexes matching well-known credential shapes, so we redact tokens that leak via a
 /// path we don't hold the value for (e.g. a `Bearer` header in a traced request).
 /// Compiled once.
@@ -134,7 +156,7 @@ fn extract_dockerfile_entry_command(dockerfile_content: &str) -> Option<String> 
         let line = line.trim();
 
         // Handle ENTRYPOINT
-        if line.to_uppercase().starts_with("ENTRYPOINT") {
+        if starts_with_keyword(line, "ENTRYPOINT") {
             let rest = line[10..].trim();
             if let Some(command) = parse_docker_command(rest) {
                 entrypoint = Some(command);
@@ -142,7 +164,7 @@ fn extract_dockerfile_entry_command(dockerfile_content: &str) -> Option<String> 
         }
 
         // Handle CMD
-        if line.to_uppercase().starts_with("CMD") {
+        if starts_with_keyword(line, "CMD") {
             let rest = line[3..].trim();
             if let Some(command) = parse_docker_command(rest) {
                 cmd = Some(command);
@@ -1252,12 +1274,11 @@ pub fn apply_provision(dockerfile: &str, provision: &Provision) -> Option<String
     }
 
     let lines: Vec<&str> = dockerfile.lines().collect();
-    let upper = |l: &str| l.trim_start().to_uppercase();
 
-    let last_from = lines.iter().rposition(|l| upper(l).starts_with("FROM "))?;
+    let last_from = lines.iter().rposition(|l| starts_with_keyword(l.trim_start(), "FROM "))?;
     let last_cmd = lines.iter().rposition(|l| {
-        let u = upper(l);
-        u.starts_with("CMD") || u.starts_with("ENTRYPOINT")
+        let t = l.trim_start();
+        starts_with_keyword(t, "CMD") || starts_with_keyword(t, "ENTRYPOINT")
     });
 
     // Only add apt packages not already mentioned anywhere in the Dockerfile.
@@ -1838,7 +1859,7 @@ CMD ["node", "/app/stdio-adapter.cjs", {entry_cmd_json}]
 fn extract_last_user(dockerfile: &str) -> String {
     dockerfile
         .lines()
-        .filter(|l| l.trim().to_uppercase().starts_with("USER "))
+        .filter(|l| starts_with_keyword(l.trim(), "USER "))
         .last()
         .map(|l| l.trim().to_string())
         .unwrap_or_default()
@@ -1851,10 +1872,9 @@ fn extract_env_lines(dockerfile: &str) -> String {
 
     for line in dockerfile.lines() {
         let trimmed = line.trim();
-        if trimmed.to_uppercase().starts_with("ENV ") {
+        if starts_with_keyword(trimmed, "ENV ") {
             // Skip PORT and MCP_PATH as we set them ourselves
-            let upper = trimmed.to_uppercase();
-            if !upper.contains("PORT=") && !upper.contains("MCP_PATH=") {
+            if !contains_keyword(trimmed, "PORT=") && !contains_keyword(trimmed, "MCP_PATH=") {
                 env_lines.push(trimmed.to_string());
             }
         }
@@ -1879,7 +1899,7 @@ fn convert_to_named_stage(dockerfile: &str, stage_name: &str) -> String {
     // Find the last FROM instruction (for multi-stage builds)
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if trimmed.to_uppercase().starts_with("FROM ") {
+        if starts_with_keyword(trimmed, "FROM ") {
             last_from_index = i;
         }
     }
@@ -1921,9 +1941,9 @@ fn convert_to_named_stage(dockerfile: &str, stage_name: &str) -> String {
 
         // Skip ENTRYPOINT and CMD from original (we'll use our own), and
         // EXPOSE (we'll use our own port) — including any continuation lines.
-        if trimmed.to_uppercase().starts_with("ENTRYPOINT") ||
-           trimmed.to_uppercase().starts_with("CMD") ||
-           trimmed.to_uppercase().starts_with("EXPOSE") {
+        if starts_with_keyword(trimmed, "ENTRYPOINT") ||
+           starts_with_keyword(trimmed, "CMD") ||
+           starts_with_keyword(trimmed, "EXPOSE") {
             cont = if continues { Cont::Skip } else { Cont::No };
             continue;
         }
@@ -1932,9 +1952,9 @@ fn convert_to_named_stage(dockerfile: &str, stage_name: &str) -> String {
         cont = if continues { Cont::Keep } else { Cont::No };
 
         // Add stage name to the last FROM instruction
-        if trimmed.to_uppercase().starts_with("FROM ") && i == last_from_index {
+        if starts_with_keyword(trimmed, "FROM ") && i == last_from_index {
             // Check if it already has an AS clause
-            if trimmed.to_uppercase().contains(" AS ") {
+            if contains_keyword(trimmed, " AS ") {
                 // Replace existing AS clause with our stage name
                 let parts: Vec<&str> = trimmed.splitn(2, " AS ").collect();
                 if let Some(base) = parts.first() {
