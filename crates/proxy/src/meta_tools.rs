@@ -80,35 +80,51 @@ pub fn default_definitions() -> Vec<ProxyMetaTool> {
 /// Rank `tools` against a lexical `query` and return up to `limit` matches.
 /// An empty query returns all tools (capped). Name matches outweigh description
 /// matches. Ties break alphabetically for stable output.
+/// Case-insensitive ASCII substring search without heap allocation.
+///
+/// Uses byte-level sliding windows with `u8::eq_ignore_ascii_case`. Safe for
+/// all ASCII input (tool names are identifiers; descriptions are typically ASCII).
+/// For Unicode haystacks the comparison degrades gracefully to ASCII case-folding
+/// only — acceptable since tool names are always ASCII.
+#[inline]
+fn ascii_contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    let n = needle.len();
+    if n == 0 {
+        return true;
+    }
+    if n > haystack.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(n)
+        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 pub fn rank_tools<'a>(tools: &'a [Tool], query: &str, limit: usize) -> Vec<&'a Tool> {
-    let terms: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    // Split without lowercasing — ascii_contains_ignore_case handles case-folding
+    // at match time, eliminating per-term and per-tool String allocations.
+    let terms: Vec<&str> = query.split_whitespace().collect();
+
+    // Fast path: empty query returns the first `limit` tools with no scoring work.
+    if terms.is_empty() {
+        return tools.iter().take(limit).collect();
+    }
 
     let mut scored: Vec<(i32, &Tool)> = tools
         .iter()
         .filter_map(|t| {
-            if terms.is_empty() {
-                return Some((0, t));
-            }
-            let name = t.name.to_lowercase();
-            let desc = t.description.as_deref().unwrap_or("").to_lowercase();
-            let mut score = 0;
+            let mut score = 0i32;
+            let desc = t.description.as_deref().unwrap_or("");
             for term in &terms {
-                if name.contains(term) {
+                if ascii_contains_ignore_case(&t.name, term) {
                     score += 2;
                 }
-                if desc.contains(term) {
+                if ascii_contains_ignore_case(desc, term) {
                     score += 1;
                 }
             }
-            if score > 0 {
-                Some((score, t))
-            } else {
-                None
-            }
+            if score > 0 { Some((score, t)) } else { None }
         })
         .collect();
 

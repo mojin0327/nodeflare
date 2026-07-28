@@ -1,4 +1,17 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+// Compiled once at first use; regex compilation is expensive (DFA construction)
+// and these functions are called per-package during lockfile/Dockerfile scanning.
+static RE_NODE_SPEC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:>=|>|\^|~)\s*(\d+)|^(\d+)").expect("static regex")
+});
+static RE_DOCKERFILE_FROM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?im)^\s*FROM\s+node:(\d+)").expect("static regex")
+});
+static RE_DOCKERFILE_NODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bnode:(\d+)(?:\.\d+)*").expect("static regex")
+});
 
 /// Parse a Node.js engines.node specifier and return the minimum required major version.
 /// Handles OR branches by taking the minimum (compatible with any branch).
@@ -6,9 +19,7 @@ pub(crate) fn min_node_major_from_spec(spec: &str) -> Option<u32> {
     spec.split("||")
         .filter_map(|branch| {
             let b = branch.trim();
-            // Match >=X, >X, ^X, ~X, or a bare number at the start
-            let re = Regex::new(r"(?:>=|>|\^|~)\s*(\d+)|^(\d+)").ok()?;
-            re.captures(b).and_then(|c| {
+            RE_NODE_SPEC.captures(b).and_then(|c| {
                 c.get(1).or(c.get(2))
                     .and_then(|m| m.as_str().parse::<u32>().ok())
             })
@@ -61,14 +72,13 @@ pub(crate) fn max_node_requirement_from_lockfile(lockfile_json: &str) -> Option<
 
 /// Extract the Node.js major version from a Dockerfile's FROM line (first `FROM node:X` match).
 pub(crate) fn node_major_in_dockerfile(dockerfile: &str) -> Option<u32> {
-    let re = Regex::new(r"(?im)^\s*FROM\s+node:(\d+)").ok()?;
-    re.captures(dockerfile)?.get(1)?.as_str().parse().ok()
+    RE_DOCKERFILE_FROM.captures(dockerfile)?.get(1)?.as_str().parse().ok()
 }
 
 /// Replace all `node:X` / `node:X.Y.Z` occurrences in a Dockerfile with `node:{target_major}`.
 /// Preserves the image variant suffix (e.g. `-alpine`, `-slim`).
 pub(crate) fn set_node_version_in_dockerfile(dockerfile: &str, target_major: u32) -> String {
-    let re = Regex::new(r"\bnode:(\d+)(?:\.\d+)*").unwrap();
-    re.replace_all(dockerfile, |_: &regex::Captures| format!("node:{}", target_major))
+    RE_DOCKERFILE_NODE
+        .replace_all(dockerfile, |_: &regex::Captures| format!("node:{}", target_major))
         .into_owned()
 }

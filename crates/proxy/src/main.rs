@@ -1186,50 +1186,60 @@ struct ForwardContext<'a> {
     code_mode: bool,
 }
 
-/// Hop-by-hop headers (RFC 7230 §6.1) — must not be forwarded by a proxy.
-const HOP_BY_HOP_HEADERS: &[&str] = &[
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-];
+/// Returns true if `name` is a hop-by-hop header (RFC 7230 §6.1).
+///
+/// `http::HeaderName::as_str()` always returns the lowercase canonical form, so a
+/// plain `match` is sufficient — no case conversion needed.
+#[inline]
+fn is_hop_by_hop(name: &str) -> bool {
+    matches!(
+        name,
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
+}
 
 /// Build the sanitized header set to send upstream: drop hop-by-hop headers (and any
 /// header named in the inbound `Connection` token list), strip the client
 /// `Authorization` only when NodeFlare did the auth, and add `X-Forwarded-*`.
 fn build_upstream_headers(inbound: &axum::http::HeaderMap, fwd: &ForwardContext) -> axum::http::HeaderMap {
-    // Headers explicitly listed as connection-tokens must also be dropped.
-    let mut conn_tokens: Vec<String> = Vec::new();
+    // `http::HeaderName::as_str()` is always lowercase, so we only lowercase the
+    // *value* tokens from the Connection header, not the header names themselves.
+    let mut conn_tokens = std::collections::HashSet::new();
     if let Some(conn) = inbound.get("connection").and_then(|v| v.to_str().ok()) {
         for tok in conn.split(',') {
             let t = tok.trim().to_ascii_lowercase();
             if !t.is_empty() {
-                conn_tokens.push(t);
+                conn_tokens.insert(t);
             }
         }
     }
 
     let mut out = axum::http::HeaderMap::new();
     for (name, value) in inbound.iter() {
-        let lname = name.as_str().to_ascii_lowercase();
+        // HeaderName::as_str() is always lowercase — no allocation needed.
+        let n = name.as_str();
         // `host` is set by the HTTP client from the target URL; `x-forwarded-for` is
         // rebuilt below to append our hop.
-        if lname == "host" || lname == "x-forwarded-for" {
+        if n == "host" || n == "x-forwarded-for" {
             continue;
         }
-        if HOP_BY_HOP_HEADERS.contains(&lname.as_str()) {
+        if is_hop_by_hop(n) {
             continue;
         }
-        if conn_tokens.iter().any(|t| t == &lname) {
+        // O(1) HashSet lookup instead of O(conn_tokens.len()) linear scan.
+        if conn_tokens.contains(n) {
             continue;
         }
         // Strip the client's Authorization only when we authenticated the request.
         // When the upstream does its own auth (auth_enabled=false), forward it.
-        if lname == "authorization" && fwd.auth_enabled {
+        if n == "authorization" && fwd.auth_enabled {
             continue;
         }
         out.append(name.clone(), value.clone());

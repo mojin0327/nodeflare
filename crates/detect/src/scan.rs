@@ -89,9 +89,11 @@ fn find_number_after(hay: &str, marker: &str) -> Option<u32> {
 /// Extract environment-variable keys read from source: `process.env.X`,
 /// `process.env['X']`, `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")`.
 pub fn scan_env_keys(src: &str) -> Vec<String> {
+    // Collect without dedup — O(n) push, then sort+dedup in O(n log n).
+    // Avoids the previous O(n²) Vec::contains check on every insertion.
     let mut keys: Vec<String> = Vec::new();
     let mut push = |k: String| {
-        if is_env_key(&k) && !keys.contains(&k) {
+        if is_env_key(&k) {
             keys.push(k);
         }
     };
@@ -109,11 +111,15 @@ pub fn scan_env_keys(src: &str) -> Vec<String> {
         collect_quoted_after(src, marker, &mut push);
     }
     keys.sort();
+    keys.dedup();
     keys
 }
 
 /// Keys from a `.env.example` file (lines of the form `KEY=...` or `KEY`).
 pub fn env_keys_from_example(content: &str) -> Vec<String> {
+    // HashSet<&str> tracks seen keys in O(1) per insertion instead of O(n)
+    // Vec::contains — avoids the previous O(n²) scan over the growing output vec.
+    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for line in content.lines() {
         let l = line.trim();
@@ -122,7 +128,7 @@ pub fn env_keys_from_example(content: &str) -> Vec<String> {
         }
         let l = l.strip_prefix("export ").unwrap_or(l);
         let key = l.split('=').next().unwrap_or("").trim();
-        if is_env_key(key) && !out.contains(&key.to_string()) {
+        if is_env_key(key) && seen.insert(key) {
             out.push(key.to_string());
         }
     }
