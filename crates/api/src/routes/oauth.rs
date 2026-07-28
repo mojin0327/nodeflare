@@ -1523,7 +1523,7 @@ pub async fn authorize_code(
 
     // SECURITY: Validate requested scopes against client's allowed scopes
     let client_scopes = client.scopes();
-    let has_wildcard = client_scopes.contains(&"*".to_string());
+    let has_wildcard = client_scopes.iter().any(|s| s == "*");
 
     if !has_wildcard {
         for scope in &requested_scopes {
@@ -1537,7 +1537,7 @@ pub async fn authorize_code(
     }
 
     // Use validated scopes (or client's scopes if wildcard requested)
-    let scopes = if requested_scopes.contains(&"*".to_string()) && !has_wildcard {
+    let scopes = if requested_scopes.iter().any(|s| s == "*") && !has_wildcard {
         client_scopes
     } else {
         requested_scopes

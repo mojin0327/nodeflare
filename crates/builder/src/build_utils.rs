@@ -375,13 +375,12 @@ fn has_glob(s: &str) -> bool {
 
 /// True for ADD sources that come from the network / a git ref, not the context.
 fn is_remote_source(src: &str) -> bool {
-    let s = src.to_lowercase();
-    s.starts_with("http://")
-        || s.starts_with("https://")
-        || s.starts_with("ftp://")
-        || s.starts_with("git@")
-        || s.starts_with("git://")
-        || (s.contains("github.com/") && s.contains('#'))
+    starts_with_keyword(src, "http://")
+        || starts_with_keyword(src, "https://")
+        || starts_with_keyword(src, "ftp://")
+        || starts_with_keyword(src, "git@")
+        || starts_with_keyword(src, "git://")
+        || (src.contains("github.com/") && src.contains('#'))
 }
 
 /// True if the path contains an unresolved build variable (`$VAR`/`${VAR}`),
@@ -408,8 +407,8 @@ fn parse_context_sources(dockerfile: &str) -> Vec<ContextSource> {
     let mut sources = Vec::new();
     for instr in logical_instructions(dockerfile) {
         let mut it = instr.splitn(2, char::is_whitespace);
-        let keyword = it.next().unwrap_or("").to_uppercase();
-        if keyword != "COPY" && keyword != "ADD" {
+        let kw = it.next().unwrap_or("");
+        if !kw.eq_ignore_ascii_case("COPY") && !kw.eq_ignore_ascii_case("ADD") {
             continue;
         }
         let rest = it.next().unwrap_or("").trim();
@@ -422,7 +421,7 @@ fn parse_context_sources(dockerfile: &str) -> Vec<ContextSource> {
         if operands.len() < 2 {
             continue;
         }
-        let is_add = keyword == "ADD";
+        let is_add = kw.eq_ignore_ascii_case("ADD");
         for src in &operands[..operands.len() - 1] {
             if src.starts_with("<<") {
                 continue; // heredoc inline content

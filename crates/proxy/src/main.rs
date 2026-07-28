@@ -1884,10 +1884,13 @@ fn scope_filter_tools(
     fwd: &ForwardContext<'_>,
 ) -> Vec<Tool> {
     match (fwd.filter_by_scope, credential) {
-        (true, Some(cred)) => tools
-            .into_iter()
-            .filter(|t| cred.is_method_allowed(McpMethod::ToolsCall, Some(&t.name)))
-            .collect(),
+        (true, Some(cred)) => {
+            let checker = cred.scope_checker();
+            tools
+                .into_iter()
+                .filter(|t| checker.is_allowed(McpMethod::ToolsCall, Some(&t.name)))
+                .collect()
+        }
         _ => tools,
     }
 }

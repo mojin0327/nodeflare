@@ -43,11 +43,11 @@ impl OAuthClient {
     }
 
     pub fn is_redirect_uri_valid(&self, uri: &str) -> bool {
-        self.redirect_uris().contains(&uri.to_string())
+        self.redirect_uris().iter().any(|u| u == uri)
     }
 
     pub fn supports_grant_type(&self, grant_type: &str) -> bool {
-        self.grant_types().contains(&grant_type.to_string())
+        self.grant_types().iter().any(|g| g == grant_type)
     }
 }
 
@@ -146,7 +146,7 @@ impl OAuthAccessToken {
 
     pub fn has_scope(&self, scope: &str) -> bool {
         let scopes = self.scopes();
-        scopes.contains(&scope.to_string()) || scopes.contains(&"*".to_string())
+        scopes.iter().any(|s| s == scope || s == "*")
     }
 
     /// Create a scope checker for this access token

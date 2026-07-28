@@ -41,9 +41,13 @@ pub fn transform_tools_list(
     filter_by_scope: bool,
     slim: bool,
 ) -> Vec<u8> {
-    let allow: Option<Box<dyn Fn(&str) -> bool + '_>> = if filter_by_scope {
+    // Build the checker once outside the closure — is_method_allowed calls scope_checker()
+    // which deserializes scopes from JSON on every call. With N tools in a tools/list,
+    // this would otherwise do N JSON deserializations per request.
+    let allow: Option<Box<dyn Fn(&str) -> bool>> = if filter_by_scope {
         credential.map(|cred| {
-            Box::new(move |name: &str| cred.is_method_allowed(McpMethod::ToolsCall, Some(name)))
+            let checker = cred.scope_checker();
+            Box::new(move |name: &str| checker.is_allowed(McpMethod::ToolsCall, Some(name)))
                 as Box<dyn Fn(&str) -> bool>
         })
     } else {

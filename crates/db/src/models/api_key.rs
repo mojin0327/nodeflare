@@ -27,7 +27,7 @@ impl ApiKey {
 
     pub fn has_scope(&self, scope: &str) -> bool {
         let scopes = self.scopes();
-        scopes.contains(&scope.to_string()) || scopes.contains(&"*".to_string())
+        scopes.iter().any(|s| s == scope || s == "*")
     }
 
     pub fn is_expired(&self) -> bool {
