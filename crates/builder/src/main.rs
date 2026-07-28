@@ -12,14 +12,12 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod build_utils;
 mod containerd;
+mod docker;
 mod firecracker;
-mod flyctl;
 mod fork_socket;
 mod tap;
-
-#[allow(dead_code)]
-mod docker;
 
 /// Send deployment notification email to workspace owner
 async fn send_deploy_notification(
@@ -1138,8 +1136,8 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
         && job.root_directory != "/"
     {
         let clean_root_dir = job.root_directory.trim_start_matches('/').to_string();
-        let workspaces = flyctl::detect_workspace_globs(source_dir);
-        if flyctl::subdir_is_workspace_member(&clean_root_dir, &workspaces) {
+        let workspaces = build_utils::detect_workspace_globs(source_dir);
+        if build_utils::subdir_is_workspace_member(&clean_root_dir, &workspaces) {
             // Always use the monorepo root as the build context so workspace deps are
             // available — this holds regardless of whether the user set an entry command.
             build_context = source_dir.to_path_buf();
@@ -1147,9 +1145,9 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
             // Auto-detect entry command only when the user hasn't set one.
             if job.entry_command.is_none() {
                 if let Some(entry) =
-                    flyctl::detect_member_entry(source_dir, &actual_source_dir, &job.runtime).await
+                    build_utils::detect_member_entry(source_dir, &actual_source_dir, &job.runtime).await
                 {
-                    let prefixed = flyctl::prefix_entry_with_subdir(&entry, &clean_root_dir);
+                    let prefixed = build_utils::prefix_entry_with_subdir(&entry, &clean_root_dir);
                     log_to_db_and_ws(
                         &ctx,
                         job.deployment_id,
@@ -1331,19 +1329,19 @@ async fn handle_build_job(mut job: BuildJob, ctx: Data<Arc<BuilderContext>>) -> 
             )
             .await?;
 
-            match flyctl::verify_mcp_initialize(&deploy.endpoint_url, &job.mcp_path, &on_log).await {
-                flyctl::ProbeOutcome::Verified => Ok(deploy),
-                flyctl::ProbeOutcome::Inconclusive(detail) => {
+            match build_utils::verify_mcp_initialize(&deploy.endpoint_url, &job.mcp_path, &on_log).await {
+                build_utils::ProbeOutcome::Verified => Ok(deploy),
+                build_utils::ProbeOutcome::Inconclusive(detail) => {
                     on_log(&format!(
                         "Warning: could not verify the MCP server responded; leaving as deployed. ({})",
                         detail
                     ));
                     Ok(deploy)
                 }
-                flyctl::ProbeOutcome::Broken(detail) => {
+                build_utils::ProbeOutcome::Broken(detail) => {
                     let server_logs = containerd::fetch_container_logs(&deploy.container_name)
                         .await
-                        .map(|l| flyctl::extract_error_lines(&l, 12))
+                        .map(|l| build_utils::extract_error_lines(&l, 12))
                         .filter(|s| !s.is_empty());
                     let message = match server_logs {
                         Some(logs) => format!(

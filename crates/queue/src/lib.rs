@@ -209,7 +209,7 @@ impl JobQueue {
         Ok(())
     }
 
-    /// Push a destroy job to tear down a deleted server's Fly.io app.
+    /// Push a destroy job to tear down a deleted server's container.
     pub async fn push_destroy_job(&self, job: DestroyJob) -> anyhow::Result<()> {
         use apalis::prelude::Storage;
         self.destroy_storage

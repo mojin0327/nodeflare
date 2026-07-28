@@ -67,12 +67,12 @@ fn note_redis_fallback(scope: &'static str) {
 /// Security: only trusts proxy headers when `TRUST_PROXY_HEADERS=true`.
 ///
 /// The originating client controls the *leftmost* entries of `X-Forwarded-For`
-/// (and can inject `fly-client-ip`/`cf-connecting-ip` headers when we are not
-/// actually behind that provider). Trusting those lets an attacker spoof an
-/// arbitrary IP — evading their own rate-limit/lockout counters or poisoning a
-/// victim's. We therefore only trust the *rightmost* hop(s) that our own
-/// infrastructure appended, and only honour `fly-client-ip` when explicitly told
-/// we sit behind Fly's edge (`PROXY_BEHIND_FLY=true`).
+/// (and can inject `cf-connecting-ip` headers when not behind that provider).
+/// Trusting those lets an attacker spoof an arbitrary IP — evading their own
+/// rate-limit counters or poisoning a victim's. We therefore only trust the
+/// *rightmost* hop(s) that our own infrastructure appended.
+///
+/// On bare-metal, Caddy terminates TLS and sets `X-Real-IP`.
 ///
 /// `TRUSTED_PROXY_HOPS` (default 1) is the number of trusted reverse proxies in
 /// front of us; we take the IP `hops` entries from the right of `X-Forwarded-For`.
@@ -83,19 +83,6 @@ pub fn extract_client_ip(headers: &HeaderMap, addr: &SocketAddr) -> String {
 
     if !trust_proxy {
         return addr.ip().to_string();
-    }
-
-    // Fly.io edge header — only trustworthy when we are actually behind Fly,
-    // otherwise a client can set it directly.
-    let behind_fly = std::env::var("PROXY_BEHIND_FLY")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
-    if behind_fly {
-        if let Some(fly_ip) = headers.get("fly-client-ip").and_then(|v| v.to_str().ok()) {
-            if is_valid_ip(fly_ip) {
-                return fly_ip.to_string();
-            }
-        }
     }
 
     // Cloudflare / nginx set these by *replacing* the value (not appending), so a

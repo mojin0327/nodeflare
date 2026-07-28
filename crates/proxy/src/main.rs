@@ -31,6 +31,7 @@ mod mcp_transform;
 mod meta_tools;
 mod rate_limit;
 mod redis_cache;
+mod unix_client;
 
 use cache::{RequestCache, CoalesceResult};
 use mcp_db::{Tool, ToolRepository, UpsertTool};
@@ -193,7 +194,7 @@ async fn main() -> Result<()> {
     let cache_ttl: u64 = std::env::var("PROXY_CACHE_TTL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(30);
+        .unwrap_or(60);
     let cache_max_entries: usize = std::env::var("PROXY_CACHE_MAX_ENTRIES")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -662,10 +663,18 @@ async fn proxy_handler(
     }
 
     // Record last_request timestamp for scale-to-zero idle detection.
-    // Throttled to one Redis write per 60 s per server — the scaler only needs
-    // minute-level precision (idle threshold is 5 min by default).
+    // Throttled to at most one Redis write per PROXY_LAST_REQUEST_THROTTLE_SECS per server
+    // (default 120 s). The scaler only needs minute-level precision (idle threshold is
+    // 5 min by default), so one write per 2 minutes is sufficient.
     {
-        const THROTTLE: std::time::Duration = std::time::Duration::from_secs(60);
+        static THROTTLE: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+        let throttle = *THROTTLE.get_or_init(|| {
+            let secs: u64 = std::env::var("PROXY_LAST_REQUEST_THROTTLE_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(120);
+            std::time::Duration::from_secs(secs)
+        });
         let should_write = {
             let mut map = state
                 .last_request_throttle
@@ -673,7 +682,7 @@ async fn proxy_handler(
                 .unwrap_or_else(|p| p.into_inner());
             let now = std::time::Instant::now();
             match map.get(&server.id) {
-                Some(t) if t.elapsed() < THROTTLE => false,
+                Some(t) if t.elapsed() < throttle => false,
                 _ => {
                     map.insert(server.id, now);
                     true
@@ -731,7 +740,15 @@ async fn proxy_handler(
     //     to fire even on proxy crash (kernel closes all fds on process exit).
     //   HTTP fallback: explicit POST /internal/kill-fork after the request
     //     completes.  Best-effort — orphans if the proxy crashes mid-request.
-    let base_url = format!("{}/{}{}", endpoint_url.trim_end_matches('/'), mcp_path, query);
+    // Unix socket endpoint_url: "unix:/run/mcp/server.sock"
+    // → base_url: "unix:/run/mcp/server.sock|/mcp?query"
+    // TCP endpoint_url: "http://127.0.0.1:PORT"
+    // → base_url: "http://127.0.0.1:PORT/mcp?query"
+    let base_url = if let Some(sock) = endpoint_url.strip_prefix("unix:") {
+        format!("unix:{}|/{}{}", sock.trim_end_matches('/'), mcp_path, query)
+    } else {
+        format!("{}/{}{}", endpoint_url.trim_end_matches('/'), mcp_path, query)
+    };
 
     // Increment the active-request counter and install a Drop guard so it is
     // ALWAYS decremented — even if forward_request returns an error or any
@@ -2024,6 +2041,14 @@ async fn execute_upstream_request(
     headers: &axum::http::HeaderMap,
     body_bytes: Bytes,
 ) -> Result<(Vec<u8>, u16, Vec<(String, String)>), ProxyError> {
+    // Route unix: URLs to the Unix Domain Socket client.
+    if let Some((socket_path, http_path)) = unix_client::parse_target(target_url) {
+        return unix_client::send_buffered(
+            socket_path, http_path, method, headers, body_bytes,
+            state.max_upstream_response_bytes,
+        ).await;
+    }
+
     // Build outgoing request. `headers` is already sanitized by build_upstream_headers
     // (hop-by-hop stripped, Authorization policy applied, X-Forwarded-* added).
     let mut req_builder = state.http_client.request(method, target_url);
@@ -2110,6 +2135,11 @@ async fn execute_streaming_request(
     headers: &axum::http::HeaderMap,
     body_bytes: Bytes,
 ) -> Result<Response, ProxyError> {
+    // Route unix: URLs to the Unix Domain Socket client.
+    if let Some((socket_path, http_path)) = unix_client::parse_target(target_url) {
+        return unix_client::send_streaming(socket_path, http_path, method, headers, body_bytes).await;
+    }
+
     // Reuse the shared, long-lived SSE client (built once at startup with a
     // connect_timeout + read/idle timeout and no total timeout) so connections are
     // pooled across requests instead of rebuilt per request.

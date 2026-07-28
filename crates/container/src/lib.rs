@@ -1,8 +1,6 @@
 //! Container management for MCP Cloud
 //!
-//! Provides abstraction over:
-//! - Docker (local development)
-//! - Fly.io Machines (production)
+//! Common types and runtime trait for container lifecycle management.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -42,11 +40,3 @@ pub trait ContainerRuntime: Send + Sync {
     async fn status(&self, id: &str) -> Result<ContainerStatus>;
     async fn logs(&self, id: &str, tail: usize) -> Result<String>;
 }
-
-pub mod docker;
-pub mod flyio;
-
-pub use docker::DockerRuntime;
-pub use flyio::{
-    AppMetrics, ExecResponse, FlyioRuntime, MetricDataPoint, WireGuardConfig, WireGuardPeerInfo,
-};

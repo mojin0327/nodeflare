@@ -6,7 +6,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::flyctl;
+use crate::build_utils;
 
 /// Spawn a command and stream stdout+stderr through `on_log` line-by-line.
 /// Returns true if the process exited successfully.
@@ -44,7 +44,7 @@ async fn run_streaming(
     tokio::spawn(async move { let _ = tokio::join!(h1, h2); });
 
     while let Some(line) = rx.recv().await {
-        let sanitized = flyctl::sanitize_log_output(&line, secrets);
+        let sanitized = build_utils::sanitize_log_output(&line, secrets);
         if !sanitized.trim().is_empty() {
             on_log(&sanitized);
         }
@@ -112,7 +112,7 @@ pub async fn build_and_run(
     let container_name = job.app_name.clone();
 
     // Prepare Dockerfile, stdio-adapter, validate secrets
-    let prep = flyctl::prepare_build(job, source_dir, secrets, plan_memory_ceiling_mb, &on_log).await?;
+    let prep = build_utils::prepare_build(job, source_dir, secrets, plan_memory_ceiling_mb, &on_log).await?;
 
     // PORT in the VM must match derive_host_port so the iptables DNAT rule is consistent.
     // Compute it once here; it is reused for env_pairs and (inside boot()) for the DNAT rule.

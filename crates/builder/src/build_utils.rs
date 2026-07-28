@@ -9,14 +9,14 @@ use std::path::Path;
 const MIN_REDACTED_SECRET_LEN: usize = 4;
 
 /// Regexes matching well-known credential shapes, so we redact tokens that leak via a
-/// path we don't hold the value for (e.g. `flyctl` echoing its own auth token, a
-/// `Bearer` header in a traced request). Compiled once.
+/// path we don't hold the value for (e.g. a `Bearer` header in a traced request).
+/// Compiled once.
 fn token_redaction_patterns() -> &'static [regex::Regex] {
     use std::sync::OnceLock;
     static PATTERNS: OnceLock<Vec<regex::Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
         [
-            // Fly.io tokens.
+            // Fly.io token shapes (kept for redacting any leaked tokens in user logs).
             r"FlyV1\s+[A-Za-z0-9_\-,/.=]+",
             r"f[om][0-9]_[A-Za-z0-9_\-]{10,}",
             // GitHub tokens (ghp_, gho_, ghs_, ghr_, ghu_, github_pat_).
@@ -89,7 +89,7 @@ fn validate_secret_value(value: &str) -> Result<()> {
         anyhow::bail!("Secret value cannot contain null bytes");
     }
 
-    // Value length limit (flyctl has limits, and very long values could cause issues)
+    // Value length limit (very long values could cause issues in container env)
     if value.len() > 65536 {
         anyhow::bail!("Secret value exceeds maximum length of 65536 bytes");
     }

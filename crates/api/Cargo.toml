@@ -16,7 +16,6 @@ mcp-github = { path = "../github" }
 mcp-detect = { path = "../detect" }
 mcp-billing = { path = "../billing" }
 mcp-email = { path = "../email" }
-mcp-container = { path = "../container" }
 
 # Async
 tokio.workspace = true

@@ -1,4 +1,4 @@
-//! Client for the sandboxed code runner (a dedicated Deno-on-Firecracker Fly app).
+//! Client for the sandboxed code runner (Deno service on bare-metal).
 //!
 //! Optional: if `PROXY_CODE_RUNNER_URL` is unset the client is `None` and code mode
 //! degrades gracefully (run_code returns an "unavailable" result). The runner executes
