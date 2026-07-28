@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Dancing_Script } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { NextIntlClientProvider } from 'next-intl';
@@ -8,6 +8,11 @@ import { getLocale, getMessages } from 'next-intl/server';
 // import { Analytics } from '@vercel/analytics/next';
 
 const inter = Inter({ subsets: ['latin'] });
+const dancingScript = Dancing_Script({
+  subsets: ['latin'],
+  variable: '--font-dancing',
+  weight: ['400', '600', '700'],
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nodeflare.tech'),
@@ -61,7 +66,7 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={`${inter.className} ${dancingScript.variable}`}>
         <NextIntlClientProvider messages={messages}>
           <Providers>{children}</Providers>
         </NextIntlClientProvider>

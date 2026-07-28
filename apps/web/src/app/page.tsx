@@ -64,8 +64,11 @@ export default async function HomePage() {
           <Header />
 
           <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-24 sm:pt-24 sm:pb-32 text-center">
-            <h1 className="mx-auto max-w-3xl text-5xl font-medium leading-[1.05] tracking-tight text-[#333333] sm:text-6xl lg:text-7xl">
-              {t('heroTitle1')} <span className="font-semibold text-violet-600">{t('heroTitle2')}</span>{t('heroTitle3')}
+            <h1
+              className="mx-auto max-w-3xl text-5xl leading-[1.15] text-[#333333] sm:text-6xl lg:text-7xl"
+              style={{ fontFamily: 'var(--font-dancing)', fontWeight: 600 }}
+            >
+              {t('heroTitle1')} <span className="text-violet-600">{t('heroTitle2')}</span>{t('heroTitle3')}
             </h1>
 
             <p className="mx-auto mt-6 max-w-2xl text-base font-medium leading-loose text-[#333333] sm:text-lg">

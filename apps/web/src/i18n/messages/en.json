@@ -166,7 +166,7 @@
     "bareMetal": {
       "badge": "Bare Metal",
       "title": "Cheaper and Faster Than Anywhere Else",
-      "description": "From August 2026, we're moving to dedicated bare-metal servers. By leaving shared environments behind and owning the full resources, we deliver hosting that's cheaper and faster than anywhere else.",
+      "description": "NodeFlare runs on dedicated bare-metal servers. By owning the full hardware stack — not sharing a cloud hypervisor — we deliver hosting that is cheaper and faster than anywhere else.",
       "descriptionExtra": "Physical servers with zero overhead mean no compromise on latency or price—making production MCP hosting smoother than ever."
     },
     "pricing": {
@@ -1355,102 +1355,104 @@
           "OAuth 2.0 (RFC 8414 / 9728)",
           "Scoped API keys",
           "initialize verification",
-          "Deno / Firecracker sandbox"
+          "nerdctl / containerd",
+          "Firecracker micro-VMs",
+          "Scale-to-zero"
         ]
       },
       "architecture": {
         "title": "Architecture at a glance",
         "p": [
-          "Three components do the work. The Builder turns a GitHub repository into a running Fly.io machine. The stdio adapter (injected at build time) wraps a stdin/stdout MCP server and speaks HTTP on its behalf. The Proxy sits in front of every server and handles auth, scope, caching, session affinity, quota, and MCP-specific response transforms. A fourth, optional component — the Runner — executes AI-written code in a locked-down sandbox."
+          "Three components do the work. The Builder (Rust, bare-metal) clones your repo, detects the runtime, generates a Dockerfile, builds an OCI image with nerdctl, and boots it inside a Firecracker micro-VM. The stdio adapter (injected at build time) wraps a stdin/stdout MCP server and speaks Streamable HTTP on its behalf. The Proxy (Rust, bare-metal) sits in front of every server and handles auth, scope, caching, session affinity, quota, and MCP-specific response transforms. A fourth, optional component — the Runner — executes AI-written code in a locked-down Deno sandbox."
         ],
-        "caption": "The proxy only ever talks HTTP to endpoint_url, so it is entirely language-agnostic. The stdio adapter is what bridges any-language MCP servers into that HTTP world."
+        "caption": "The proxy routes to a Firecracker VM port derived deterministically from the container name, so session affinity is stable across restarts. The stdio adapter bridges any-language MCP servers into that HTTP world — language-agnostic by design."
       },
       "builder": {
         "title": "The Builder: from a GitHub repo to a live MCP",
         "p": [
-          "The builder is a Rust service that clones your repo at a specific commit, works out how to build and start it, generates a Dockerfile, builds the image remotely on Fly.io, deploys a machine, and then proves the MCP server actually answers."
+          "The builder is a Rust service running on bare-metal. It clones your repo at a specific commit, detects how to build and start it, generates a Dockerfile, builds the OCI image with nerdctl (containerd), boots it as a Firecracker micro-VM, and then proves the MCP server actually answers."
         ],
         "steps": [
           {
             "t": "Fetch source",
-            "d": "Clone via the GitHub App tarball (or public git). root_directory is resolved with path-traversal protection; monorepos (npm/yarn/pnpm workspaces) are detected so dependencies hoisted at the repo root still resolve."
+            "d": "Clone via the GitHub App tarball (or public git). root_directory is resolved with path-traversal protection; monorepos (npm/yarn/pnpm workspaces) are auto-detected so dependencies hoisted at the repo root still resolve correctly."
           },
           {
             "t": "Detect runtime & commands",
-            "d": "node/python/go/rust/docker is inferred from manifests (package.json, pyproject.toml / requirements.txt / uv.lock, go.mod, Cargo.toml). Package manager (npm vs pnpm) and the start / build commands are auto-derived — scripts.start → main → bin for Node, [project.scripts] or server.py / main.py for Python, and so on. An explicit entry_command / build_command always wins."
+            "d": "node/python/go/rust/docker is inferred from manifests (package.json, pyproject.toml / requirements.txt / uv.lock, go.mod, Cargo.toml). Package manager (npm vs pnpm) and start/build commands are auto-derived — scripts.start → main → bin for Node; [project.scripts] or server.py/main.py for Python; and so on. An explicit entry_command / build_command always wins. The Node.js version in the Dockerfile is also automatically bumped if package-lock.json's transitive engines.node field demands a newer major."
           },
           {
             "t": "Generate the Dockerfile",
-            "d": "A per-runtime Dockerfile is generated (or your own is validated and wrapped). For stdio servers, the stdio adapter is copied in and made the container entrypoint."
+            "d": "A per-runtime Dockerfile is generated (or your own is validated and wrapped). For stdio servers, the stdio adapter (stdio-adapter.cjs) is copied in and set as the container entrypoint so the adapter spawns your server as a child process."
           },
           {
             "t": "Inject secrets",
-            "d": "Environment variables are decrypted from the database and passed to Fly via stdin (never argv), and never appear in build logs — a redaction pass scrubs known token shapes."
+            "d": "Environment variables are decrypted from the database and injected at runtime (never exposed in build args or argv). A redaction pass scrubs known token shapes from build logs before they are streamed to the client."
           },
           {
-            "t": "Build & deploy",
-            "d": "The image is built remotely (flyctl deploy --remote-only) and a machine is started in the chosen region with the resolved memory and internal port."
+            "t": "Build & boot",
+            "d": "The OCI image is built on bare-metal with nerdctl build (containerd), optionally pushed to a private registry, and then booted as a Firecracker micro-VM. A deterministic host port is derived from the container name via FNV-1a hash, so routing is stable across restarts without a port-allocation service."
           },
           {
             "t": "Verify a real initialize",
-            "d": "A started machine is not proof of a working MCP. The builder POSTs a real MCP initialize (up to 8 attempts); if the child crash-loops behind the adapter, the deploy is failed and the actual server error is surfaced instead of a false success."
+            "d": "A started VM is not proof of a working MCP. The builder POSTs a real MCP initialize (up to 8 attempts, with back-off). If the child crash-loops behind the adapter, the deploy fails and the actual server error is surfaced instead of a false success."
           }
         ],
         "note": "That last step is the MCP-specific safety net: a wrong entry path leaves the adapter's HTTP up while your server is dead. NodeFlare probes initialize so that \"deployed\" means \"actually answering MCP\".",
-        "why": "You push a repo and get a working MCP endpoint — no Dockerfile, no port wiring, no stdio glue to write. And because a deploy only goes green after a real initialize round-trips, you find a broken entry command at deploy time, not from your first client's failing request."
+        "why": "You push a repo and get a working MCP endpoint — no Dockerfile, no port wiring, no stdio glue to write. The Node.js version auto-upgrades to match your dependencies. And because a deploy only goes green after a real initialize round-trips, you find a broken entry command at deploy time, not from your first client's failing request."
       },
       "adapter": {
         "title": "The stdio → Streamable HTTP adapter",
         "p": [
-          "Most MCP servers are written to run locally over stdin/stdout — the way Claude Desktop launches them with npx. That is exactly what makes them hard to host. NodeFlare's answer is a small Node adapter that is injected into your image at build time and becomes the container entrypoint.",
+          "Most MCP servers are written to run locally over stdin/stdout — the way Claude Desktop launches them with npx. That is exactly what makes them hard to host. NodeFlare's answer is a small Node adapter (stdio-adapter.cjs) that is injected into your image at build time and becomes the Firecracker VM entrypoint.",
           "The adapter spawns your MCP server as a child process and bridges its stdio JSON-RPC to a Streamable HTTP endpoint (plus the legacy 2024-11-05 HTTP+SSE for older clients). It is completely language-agnostic: it does not care whether the child is Node, Python, Go, or Rust — it only speaks JSON-RPC over stdin/stdout."
         ],
         "features": [
           {
             "t": "Concurrent-safe id remapping",
-            "d": "Every incoming request is rewritten to a private JSON-RPC id before it reaches the shared child, and the caller's original id is restored on the way out — so many clients can share one process without collisions."
+            "d": "Every incoming request is rewritten to a private JSON-RPC id before it reaches the shared child, and the caller's original id is restored on the way out — so many clients can share one process without id collisions."
           },
           {
             "t": "Warm auto-initialize",
-            "d": "The child is initialized on startup and the result cached, so deployment health is detectable and clients never hit \"already initialized\" errors."
+            "d": "The child is initialized on startup and the result cached, so deployment health is detectable immediately and clients never hit \"already initialized\" errors."
           },
           {
             "t": "Restart budget with backoff",
-            "d": "Crashes are retried with exponential backoff (1s → 30s) up to a budget; once spent, /health returns 503 so the platform surfaces the failure instead of hiding a crash-loop."
+            "d": "Crashes are retried with exponential backoff (1s → 30s) up to a budget; once spent, /health returns 503 so the platform surfaces the failure instead of hiding a crash-loop behind an HTTP 200."
           },
           {
             "t": "Session & path wiring",
-            "d": "Session ids are generated on initialize; the MCP path (default /mcp), host, and port are wired from build config so the proxy can reach it."
+            "d": "Session ids are generated on initialize; the MCP path (default /mcp), host, and port are wired from build config so the proxy can reach the VM deterministically."
           }
         ],
-        "why": "Any MCP server ever written for Claude Desktop — in any language — becomes a shareable HTTPS URL with zero code changes. You keep writing a normal stdio server; NodeFlare turns it into a multi-client cloud endpoint."
+        "why": "Any MCP server ever written for Claude Desktop — in any language — becomes a shareable HTTPS URL with zero code changes. You keep writing a normal stdio server; NodeFlare turns it into a multi-client cloud endpoint running in an isolated Firecracker VM."
       },
       "proxy": {
         "title": "The Proxy: auth, scope & MCP-aware routing",
         "p": [
-          "Every request to a hosted server passes through the Rust proxy. It resolves the target server from the request subdomain, authenticates the caller, enforces authorization at the MCP-method level, and only then forwards to the upstream endpoint — applying MCP-aware transforms on the way back.",
-          "Because it understands the MCP protocol, the proxy can do things a plain reverse proxy cannot: authorize an individual tools/call by tool name, filter a tools/list per caller, and pin an MCP session to the machine that created it."
+          "Every request to a hosted server passes through the Rust proxy (running on bare-metal). It resolves the target server from the request subdomain, authenticates the caller, enforces authorization at the MCP-method level, and only then forwards to the upstream Firecracker VM — applying MCP-aware transforms on the way back.",
+          "Because it understands the MCP protocol, the proxy can do things a plain reverse proxy cannot: authorize an individual tools/call by tool name, filter a tools/list per caller, pin an MCP session to the VM that created it, and auto-detect when a repo is a valid MCP server."
         ],
         "features": [
           {
             "t": "API keys & OAuth",
-            "d": "Bearer tokens are either mcp_* API keys (hashed, Redis-cached, with brute-force lockout) or OAuth access tokens validated against the DB. The proxy also serves the OAuth discovery metadata (RFC 8414 / 9728)."
+            "d": "Bearer tokens are either mcp_* API keys (hashed, Redis-cached with 60 s TTL, with brute-force lockout) or OAuth access tokens validated against the DB. The proxy also serves the OAuth discovery metadata (RFC 8414 / 9728) so any standards-compliant MCP client can discover auth automatically."
           },
           {
             "t": "Per-request scope enforcement",
             "d": "Before forwarding, the caller's scopes are checked against the exact MCP method and target — e.g. tools:call:get_weather. A denial returns a JSON-RPC error and never reaches your server."
           },
           {
-            "t": "Session affinity to Fly machines",
-            "d": "initialize picks a machine and binds the returned Mcp-Session-Id to it in Redis; follow-up requests are pinned back to that machine, with stale bindings detected and healed."
+            "t": "Session affinity",
+            "d": "initialize binds the returned Mcp-Session-Id to a specific Firecracker VM port in Redis (TTL 2 h). Follow-up requests for that session are pinned to the same VM; stale bindings are detected and healed automatically."
           },
           {
             "t": "Caller-scoped cache & coalescing",
-            "d": "Read-only list methods are cached and de-duplicated, but the cache key includes the caller's identity — so one credential's filtered list is never served to another."
+            "d": "Read-only list methods (tools/list, resources/list, prompts/list) are cached (60 s TTL) and de-duplicated. The cache key always includes the caller's identity, so one credential's filtered list is never served to another."
           },
           {
             "t": "Rate limit & monthly quota",
-            "d": "Per-minute limits and per-workspace monthly quotas are enforced with atomic Redis scripts; the quota is incremented before forwarding to avoid overshoot."
+            "d": "Per-minute IP rate limits and per-workspace monthly quotas are enforced with atomic Lua scripts against Redis; the quota is incremented before forwarding to avoid overshoot even under concurrent load."
           },
           {
             "t": "All three MCP primitives",
@@ -1469,22 +1471,22 @@
           {
             "flag": "tool_list_filter_by_scope",
             "t": "Show only callable tools",
-            "d": "tools/list is filtered to the tools the caller's credential is actually scoped to call. Narrower list, identical schemas."
+            "d": "tools/list is filtered to the tools the caller's credential is actually scoped to call. The AI sees a narrower list; schemas for the visible tools are unchanged."
           },
           {
             "flag": "tool_schema_slim",
             "t": "Trim bloated descriptions",
-            "d": "Tool descriptions longer than 500 characters are truncated (UTF-8 safe). Names and input schemas are untouched."
+            "d": "Tool descriptions longer than 500 characters are truncated (UTF-8-safe boundary). Names and input schemas are untouched — only the description prose is shortened."
           },
           {
             "flag": "tool_search_mode",
             "t": "Replace the catalog with search",
-            "d": "tools/list collapses to two meta-tools — search_tools(query) and call_tool(name, args). The model searches the catalog (lexical, or semantic when embeddings are configured) and calls tools on demand, so the upfront token cost is roughly constant regardless of catalog size."
+            "d": "tools/list collapses to two meta-tools — search_tools(query) and call_tool(name, args). The model searches the catalog on demand (lexical match, or semantic when embeddings are configured), so the upfront token cost is roughly constant regardless of how many tools the server has."
           },
           {
             "flag": "tool_code_mode",
             "t": "Let the model write code",
-            "d": "Exposes run_code + search_tools. Instead of many tool round-trips, the model writes JavaScript that calls tools.* — executed in a sandbox (see below). Ideal for filtering and joining across many calls."
+            "d": "Exposes run_code + search_tools. Instead of many tool round-trips, the model writes JavaScript that calls tools.* — executed in a sandboxed Deno subprocess (see below). Ideal for filtering and joining results across many calls in one shot."
           }
         ],
         "why": "The same MCP server costs far fewer tokens per turn without editing its code. On a big catalog, search and code mode keep the up-front tool list roughly flat instead of growing every time you add a tool — so context stays cheap and the model stays focused."
@@ -1492,50 +1494,54 @@
       "code": {
         "title": "Code mode & the sandboxed runner",
         "p": [
-          "When tool_code_mode is on, the model can call run_code with a block of JavaScript. NodeFlare executes it in a dedicated Deno-on-Firecracker sandbox — a separate service from the proxy — with a network allow-list that permits exactly one destination: the proxy's tool-callback endpoint.",
-          "Inside the sandbox, tools.NAME(args) is injected as an async function. Each call POSTs back to the proxy carrying a per-execution bearer token; the runner never sees your credentials or the upstream URL."
+          "When tool_code_mode is on, the model can call run_code with a block of JavaScript. NodeFlare sends it to a dedicated Deno service — separate from the proxy — which executes each request in a fresh, locked-down Deno subprocess. The subprocess has no filesystem access, no environment variables, no ability to spawn processes, and a network allow-list that permits exactly one destination: the proxy's tool-callback endpoint.",
+          "Inside the subprocess, tools.NAME(args) is injected as an async function. Each call POSTs back to the proxy carrying a per-execution bearer token; the runner never sees your upstream credentials or server URL."
         ],
         "steps": [
           {
             "t": "Issue a short-lived token",
-            "d": "The proxy mints a one-off UUID token, stores the server id, target URL and scopes in Redis with a TTL of the run timeout + 10s, and dispatches the code to the runner."
+            "d": "The proxy mints a one-off UUID token, stores the server id, target URL and caller scopes in Redis with a TTL of (run timeout + 10 s), and dispatches the JavaScript to the runner service."
           },
           {
             "t": "Run in isolation",
-            "d": "A fresh Deno subprocess runs the code with no filesystem, no env, no subprocess — only outbound network to the callback endpoint. A wall-clock timeout SIGKILLs it."
+            "d": "A fresh Deno subprocess runs the code with --allow-net restricted to the callback endpoint host only. No filesystem, no env, no subprocess spawning. A wall-clock timeout SIGKILLs it if it exceeds the budget."
           },
           {
             "t": "Re-check scope on every tool call",
-            "d": "The callback endpoint looks up the token, confirms it is bound to this server, and re-validates the scope (e.g. tools:call:X) before forwarding a real tools/call upstream — the sandbox wrapper is never the security boundary."
+            "d": "The callback endpoint looks up the token, confirms it is bound to this server, and re-validates the scope (e.g. tools:call:search_videos) before forwarding a real tools/call upstream. The sandbox wrapper is never the security boundary — the proxy is."
           },
           {
             "t": "Return the result",
-            "d": "Tool errors are wrapped so the model can catch and retry; the final value is serialized and returned as the run_code result."
+            "d": "Tool errors are wrapped so the model can catch and retry inside the same run. The final return value is serialized and delivered as the run_code result."
           }
         ],
-        "limits": "Guardrails: a configurable wall-clock timeout (default 15s) and a max tool-call budget per run (default 50). If no runner is configured, code mode degrades gracefully and run_code reports itself unavailable.",
+        "limits": "Guardrails: a configurable wall-clock timeout (default 600 s) and a max tool-call budget per run (default 50). Each Deno subprocess is capped at 128 MB V8 heap. If no runner is configured, code mode degrades gracefully and run_code reports itself unavailable.",
         "why": "The model does multi-step tool work in one round-trip instead of N — filtering, joining and looping happen inside the sandbox, cutting both tokens and latency. And it is not a security trade-off: every tool call is scope-checked server-side exactly as if the model had called it directly."
       },
       "hosting": {
         "title": "Hosting model built for MCP workloads",
         "p": [
-          "MCP servers have an unusual traffic shape: idle for long stretches, then bursty when an agent picks them up. NodeFlare's runtime and access model are tuned for that, not for a long-running web service."
+          "MCP servers have an unusual traffic shape: idle for long stretches, then bursty when an agent picks them up. NodeFlare runs on dedicated bare-metal servers and uses Firecracker micro-VMs per MCP server — a combination that makes scale-to-zero fast and cheap, without sharing noisy neighbours."
         ],
         "features": [
           {
             "t": "Scale-to-zero",
-            "d": "Machines stop when idle (min_machines_running = 0) and auto-start on the next request. An MCP server that no one is using right now costs nothing, and wakes on demand."
+            "d": "Firecracker micro-VMs stop when idle and restart automatically on the next request. The proxy tracks last-request time in Redis (throttled writes to avoid Redis pressure); an idle VM costs nothing while its OCI image stays ready for a fast cold boot."
           },
           {
             "t": "Pass-through auth",
             "d": "Set auth_enabled = false and NodeFlare skips its own auth layer, forwarding the caller's credentials straight to your server. For MCP servers that already do their own OAuth (Notion, GitHub, etc.), you keep their native auth instead of double-wrapping it."
           },
           {
-            "t": "Right-sized & private",
-            "d": "Each server picks a machine memory from a fixed ladder (256 MB – 2 GB, capped by plan) and a deploy region, and can be kept private rather than publicly listed. Browser-heavy servers get 2 GB; a tiny tool server stays at 256 MB."
+            "t": "Right-sized VMs",
+            "d": "Each server picks a VM memory from a fixed ladder (256 MB – 2 GB, capped by plan) and a deploy region. Browser-heavy servers (Playwright, Puppeteer) get 2 GB; a tiny tool server stays at 256 MB. Servers can also be kept private rather than publicly listed."
+          },
+          {
+            "t": "Upstream OAuth pass-through",
+            "d": "A server can require a user-granted access token from an external OAuth provider (Google, GitHub, or custom) before serving any MCP request. NodeFlare manages the OAuth dance and injects the provider token into the server's environment — your server code never touches auth."
           }
         ],
-        "why": "You pay for the shape MCP actually has — bursts, not a 24/7 idle machine — and servers that bring their own auth slot in without fighting NodeFlare's. Hosting adapts to the server instead of forcing every server into one mold."
+        "why": "You pay for the shape MCP actually has — bursts, not a 24/7 idle VM — and servers that bring their own auth slot in without fighting NodeFlare's. Hosting adapts to the server instead of forcing every server into one mold."
       },
       "security": {
         "title": "Security model",
@@ -1545,10 +1551,11 @@
         "points": [
           "Scopes are checked per request against the exact MCP method and target; denials return a JSON-RPC error before reaching your server.",
           "Cache and request-coalescing keys include caller identity, so scope- or subscription-filtered results never leak across credentials.",
-          "Code-execution tokens are single-purpose: bound to one server, short-lived, and re-checked for scope on every tool call.",
-          "The code sandbox has no filesystem, no env, and a one-destination network allow-list; it holds only a per-run token, not your credentials.",
-          "Secrets are encrypted at rest, injected to the builder via stdin, and redacted from build logs.",
-          "A deploy is only \"successful\" after a real MCP initialize round-trips — a crash-looping server fails the deploy instead of silently 500-ing."
+          "Code-execution tokens are single-purpose: bound to one server, short-lived (TTL = run timeout + 10 s), and re-checked for scope on every tool call.",
+          "The code sandbox subprocess has no filesystem, no env, and a one-destination network allow-list; it holds only a per-run token, not your credentials.",
+          "Secrets are encrypted at rest and injected at VM boot time as environment variables; they are never written to build args, image layers, or build logs (a redaction pass scrubs known token shapes).",
+          "A deploy is only \"successful\" after a real MCP initialize round-trips — a crash-looping server fails the deploy instead of silently returning HTTP 500.",
+          "API key lookups are Redis-cached (60 s TTL) with brute-force lockout: five consecutive wrong guesses lock the key for 15 minutes."
         ]
       }
     }

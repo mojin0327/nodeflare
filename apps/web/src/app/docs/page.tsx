@@ -221,26 +221,31 @@ export default function DocsPage() {
         │   Streamable HTTP · legacy SSE   (JSON-RPC 2.0)
         ▼
  ┌──────────────────────────────────────────────┐
- │  PROXY  (Rust)                                │
+ │  PROXY  (Rust · bare-metal)                   │
  │  API key / OAuth · per-request scope check    │
  │  caller-scoped cache · session affinity ·     │
  │  rate limit + monthly quota · tool transforms │
  └───────────────────────┬──────────────────────┘
-        │   POST {endpoint}/mcp   (pinned to one Fly machine)
+        │   POST {endpoint}/mcp   (pinned to one Firecracker VM)
         ▼
  ┌──────────────────────────────────────────────┐
- │  stdio-adapter.cjs  (Node, injected at build) │
- │  stdin/stdout  <->  Streamable HTTP           │
- └───────────────────────┬──────────────────────┘
-        │   JSON-RPC over stdio
-        ▼
- ┌──────────────────────────────────────────────┐
- │  YOUR MCP SERVER                              │
- │  node · python · go · rust · docker           │
+ │  Firecracker micro-VM  (per MCP server)       │
+ │  ┌────────────────────────────────────────┐   │
+ │  │ stdio-adapter.cjs  (injected at build)  │   │
+ │  │ stdin/stdout  <->  Streamable HTTP      │   │
+ │  └──────────────────┬─────────────────────┘   │
+ │         │  JSON-RPC over stdio                 │
+ │         ▼                                      │
+ │  ┌──────────────────────────────────────────┐  │
+ │  │  YOUR MCP SERVER                          │  │
+ │  │  node · python · go · rust · docker       │  │
+ │  └──────────────────────────────────────────┘  │
  └──────────────────────────────────────────────┘
 
- BUILDER (Rust)  GitHub repo -> detect -> Dockerfile -> Fly image -> deploy -> verify initialize
- RUNNER  (Deno)  run_code -> Firecracker sandbox -> tools.* -> proxy (scope re-checked per call)`}</Diagram>
+ BUILDER (Rust · bare-metal)
+   GitHub repo ─▶ detect runtime ─▶ Dockerfile ─▶ nerdctl build ─▶ Firecracker VM ─▶ verify initialize
+
+ RUNNER  (Deno)  run_code ─▶ sandboxed Deno subprocess ─▶ tools.* ─▶ proxy (scope re-checked per call)`}</Diagram>
               <p className="text-sm text-gray-500">{t('sec.architecture.caption')}</p>
             </Section>
 
