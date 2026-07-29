@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, Dancing_Script, Klee_One } from 'next/font/google';
+import { Inter, Kaushan_Script, Klee_One } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { NextIntlClientProvider } from 'next-intl';
@@ -8,10 +8,15 @@ import { getLocale, getMessages } from 'next-intl/server';
 // import { Analytics } from '@vercel/analytics/next';
 
 const inter = Inter({ subsets: ['latin'] });
-const dancingScript = Dancing_Script({
+const dancingScript = Kaushan_Script({
   subsets: ['latin'],
   variable: '--font-dancing',
-  weight: ['400', '600', '700'],
+  weight: ['400'],
+});
+const kleeOne = Klee_One({
+  subsets: ['latin', 'latin-ext', 'japanese'],
+  variable: '--font-klee',
+  weight: ['400', '600'],
 });
 const kleeOne = Klee_One({
   subsets: ['latin', 'latin-ext'],

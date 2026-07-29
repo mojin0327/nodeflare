@@ -49,7 +49,16 @@ export default async function HomePage() {
 
       <main>
         {/* Hero - クリーンな中央寄せ + デプロイカード */}
-        <section className="relative isolate overflow-hidden">
+        <section className="relative isolate overflow-hidden h-[850px]">
+          {/* 背景画像 */}
+          <Image
+            src="/top.png"
+            alt=""
+            fill
+            className="-z-20 object-cover"
+            style={{ objectPosition: 'center 0%' }}
+            priority
+          />
           {/* 上部の淡いグラデーション */}
           <div className="absolute inset-x-0 top-0 -z-10 h-[420px] bg-gradient-to-b from-violet-50/70 via-white/40 to-transparent pointer-events-none" />
           {/* 中央のぼやっとしたテーマカラーの光 */}
@@ -63,12 +72,12 @@ export default async function HomePage() {
           {/* ヘッダーをヒーロー背景の上に重ねて、bgを共有する */}
           <Header />
 
-          <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-24 sm:pt-24 sm:pb-32 text-center">
+          <div className="absolute inset-x-0 top-[37%] -translate-y-1/2 max-w-5xl mx-auto px-6 text-center">
             <h1
-              className="mx-auto max-w-3xl text-5xl leading-[1.15] text-[#333333] sm:text-6xl lg:text-7xl"
-              style={{ fontFamily: 'var(--font-dancing), var(--font-klee)', fontWeight: 800 }}
+              className="mx-auto max-w-3xl text-6xl leading-[1.15] text-[#323232] sm:text-7xl lg:text-8xl"
+              style={{ fontFamily: 'var(--font-dancing), var(--font-klee)', fontWeight: 400 }}
             >
-              {t('heroTitle1')} <span className="text-violet-600">{t('heroTitle2')}</span>{t('heroTitle3')}
+              <span style={{ fontWeight: 600 }}>{t('heroTitle1')} </span><span className="text-violet-600">{t('heroTitle2')}</span><span style={{ fontWeight: 600 }}>{t('heroTitle3')}</span>
             </h1>
 
             <Suspense fallback={

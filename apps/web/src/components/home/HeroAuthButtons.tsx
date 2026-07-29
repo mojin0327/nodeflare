@@ -11,8 +11,8 @@ export function HeroAuthButtons() {
   return (
     <div className="mt-8 flex flex-wrap justify-center gap-3">
       <Link href="/signup">
-        <Button size="sm" className="h-7 text-xs px-2.5 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
-          <LogIn className="w-3.5 h-3.5 mr-1" />
+        <Button size="default" className="h-10 text-sm px-8 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
+          <LogIn className="w-4 h-4 mr-1.5" />
           {t('getStarted')}
         </Button>
       </Link>
