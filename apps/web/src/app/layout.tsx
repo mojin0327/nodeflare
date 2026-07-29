@@ -14,7 +14,7 @@ const dancingScript = Kaushan_Script({
   weight: ['400'],
 });
 const kleeOne = Klee_One({
-  subsets: ['latin', 'latin-ext', 'japanese'],
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-klee',
   weight: ['400', '600'],
 });
