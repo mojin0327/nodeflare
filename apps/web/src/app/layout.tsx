@@ -18,11 +18,6 @@ const kleeOne = Klee_One({
   variable: '--font-klee',
   weight: ['400', '600'],
 });
-const kleeOne = Klee_One({
-  subsets: ['latin', 'latin-ext'],
-  variable: '--font-klee',
-  weight: ['400', '600'],
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nodeflare.tech'),
