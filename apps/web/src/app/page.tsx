@@ -66,14 +66,10 @@ export default async function HomePage() {
           <div className="relative max-w-5xl mx-auto px-6 pt-20 pb-24 sm:pt-24 sm:pb-32 text-center">
             <h1
               className="mx-auto max-w-3xl text-5xl leading-[1.15] text-[#333333] sm:text-6xl lg:text-7xl"
-              style={{ fontFamily: 'var(--font-dancing)', fontWeight: 600 }}
+              style={{ fontFamily: 'var(--font-dancing), var(--font-klee)', fontWeight: 800 }}
             >
               {t('heroTitle1')} <span className="text-violet-600">{t('heroTitle2')}</span>{t('heroTitle3')}
             </h1>
-
-            <p className="mx-auto mt-6 max-w-2xl text-base font-medium leading-loose text-[#333333] sm:text-lg">
-              {t('heroDescription1')} {t('heroDescription2')}
-            </p>
 
             <Suspense fallback={
               <div className="mt-8 flex flex-wrap justify-center gap-3">

@@ -34,13 +34,17 @@ export default function BillingSuccessPage() {
     }
   }, [subscription]);
 
-  // Track elapsed time
+  // Track elapsed time — stop at 30s or when complete
   useEffect(() => {
+    if (isComplete) return;
     const timer = setInterval(() => {
-      setElapsedTime((prev) => prev + 1);
+      setElapsedTime((prev) => {
+        if (prev >= 29) clearInterval(timer);
+        return prev + 1;
+      });
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isComplete]);
 
   // Redirect after completion
   useEffect(() => {

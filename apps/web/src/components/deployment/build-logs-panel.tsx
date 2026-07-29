@@ -7,6 +7,14 @@ import { useBuildLogsWebSocket } from '@/hooks/use-websocket';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
+const LOG_LINE_STYLES: Record<string, string> = {
+  error: 'text-red-400 bg-red-500/10',
+  warning: 'text-yellow-400 bg-yellow-500/5',
+  success: 'text-green-400',
+  step: 'text-cyan-400 font-medium',
+  default: 'text-gray-300',
+};
+
 interface BuildLogsPanelProps {
   deploymentId: string;
   workspaceId?: string;
@@ -199,11 +207,15 @@ export function BuildLogsPanel({
     return () => clearInterval(intervalId);
   }, [workspaceId, serverId, deploymentId, realtimeLogs.length]);
 
-  // Auto-scroll to bottom when new real-time logs arrive
+  // Auto-scroll to bottom — debounced to avoid excessive calls on high-frequency logs
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!autoScroll || !bottomRef.current) return;
+    clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 80);
+    return () => clearTimeout(scrollTimerRef.current);
   }, [realtimeLogs, autoScroll]);
 
   // Detect manual scroll to disable auto-scroll
@@ -214,20 +226,6 @@ export function BuildLogsPanel({
     setAutoScroll(isAtBottom);
   };
 
-  const getLineStyles = (type: ParsedLogLine['type']) => {
-    switch (type) {
-      case 'error':
-        return 'text-red-400 bg-red-500/10';
-      case 'warning':
-        return 'text-yellow-400 bg-yellow-500/5';
-      case 'success':
-        return 'text-green-400';
-      case 'step':
-        return 'text-cyan-400 font-medium';
-      default:
-        return 'text-gray-300';
-    }
-  };
 
   const totalLines = parsedHistoricalLogs.length + realtimeLogs.length;
   const hasLogs = totalLines > 0;
@@ -330,7 +328,7 @@ export function BuildLogsPanel({
             key={`hist-${log.lineNumber}`}
             className={cn(
               'flex px-4 py-0.5 hover:bg-gray-800/50',
-              getLineStyles(log.type)
+              LOG_LINE_STYLES[log.type] ?? LOG_LINE_STYLES.default
             )}
           >
             <span className="w-12 flex-shrink-0 text-right pr-4 text-gray-600 select-none border-r border-gray-800 mr-4">
@@ -349,7 +347,7 @@ export function BuildLogsPanel({
               key={`rt-${log.timestamp}-${index}`}
               className={cn(
                 'flex px-4 py-0.5 hover:bg-gray-800/50',
-                getLineStyles(log.type)
+                LOG_LINE_STYLES[log.type] ?? LOG_LINE_STYLES.default
               )}
             >
               <span className="w-12 flex-shrink-0 text-right pr-4 text-gray-600 select-none border-r border-gray-800 mr-4">

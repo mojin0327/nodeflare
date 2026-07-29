@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, Dancing_Script } from 'next/font/google';
+import { Inter, Dancing_Script, Klee_One } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { NextIntlClientProvider } from 'next-intl';
@@ -12,6 +12,11 @@ const dancingScript = Dancing_Script({
   subsets: ['latin'],
   variable: '--font-dancing',
   weight: ['400', '600', '700'],
+});
+const kleeOne = Klee_One({
+  subsets: ['latin', 'latin-ext'],
+  variable: '--font-klee',
+  weight: ['400', '600'],
 });
 
 export const metadata: Metadata = {
@@ -66,7 +71,7 @@ export default async function RootLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className={`${inter.className} ${dancingScript.variable}`}>
+      <body className={`${inter.className} ${dancingScript.variable} ${kleeOne.variable}`}>
         <NextIntlClientProvider messages={messages}>
           <Providers>{children}</Providers>
         </NextIntlClientProvider>

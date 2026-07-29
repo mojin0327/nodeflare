@@ -3,21 +3,17 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { LogIn } from 'lucide-react';
 
 export function HeroAuthButtons() {
   const t = useTranslations('home');
-  const tNav = useTranslations('nav');
 
   return (
     <div className="mt-8 flex flex-wrap justify-center gap-3">
       <Link href="/signup">
-        <Button className="h-10 px-5 text-sm rounded-lg bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
+        <Button size="sm" className="h-7 text-xs px-2.5 bg-violet-600 hover:bg-violet-700 border border-violet-900 text-white">
+          <LogIn className="w-3.5 h-3.5 mr-1" />
           {t('getStarted')}
-        </Button>
-      </Link>
-      <Link href="/docs">
-        <Button variant="outline" className="h-10 px-5 text-sm rounded-lg border-gray-300 text-gray-700 hover:bg-gray-50">
-          {tNav('docs')}
         </Button>
       </Link>
     </div>

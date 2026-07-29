@@ -8,15 +8,13 @@ import { useWorkspace } from '@/hooks/use-workspace';
 import { JazzAvatar } from '@/components/ui/jazz-avatar';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Plus, AlertCircle, ChevronRight, Play } from 'lucide-react';
 import { DashboardPageSkeleton } from './page-skeletons';
 
 // Constants
 const STATS_STALE_TIME_MS = 60 * 1000; // 1 minute
-const PULSE_DURATION_MS = 1000;
-const PULSE_INTERVAL_MS = 3000;
 const DEFAULT_MAX_SERVERS = 3;
 const DEFAULT_MAX_REQUESTS = 10000;
 
@@ -227,18 +225,6 @@ function ServerStatusRow({
   server: McpServerBasic;
   t: (key: string) => string;
 }) {
-  const [pulse, setPulse] = useState(false);
-
-  useEffect(() => {
-    if (server.status === 'running') {
-      const interval = setInterval(() => {
-        setPulse(true);
-        setTimeout(() => setPulse(false), PULSE_DURATION_MS);
-      }, PULSE_INTERVAL_MS);
-      return () => clearInterval(interval);
-    }
-  }, [server.status]);
-
   return (
     <Link
       href={`/dashboard/servers/${server.id}`}
@@ -247,7 +233,7 @@ function ServerStatusRow({
       <div className="relative w-8 h-8 flex-shrink-0">
         <JazzAvatar seed={server.id} diameter={32} />
         {server.status === 'running' && (
-          <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white ${pulse ? 'animate-ping' : ''}`} />
+          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white animate-ping" />
         )}
       </div>
       <div className="flex-1 min-w-0">

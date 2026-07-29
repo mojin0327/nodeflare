@@ -789,30 +789,31 @@ export default function ServerDetailPage() {
 function DeploymentsTab({ deployments, workspaceId, serverId, t, tCommon, selectedDeploymentId, onSelectDeployment }: { deployments: Deployment[]; workspaceId?: string; serverId: string; t: (key: string) => string; tCommon: (key: string) => string; selectedDeploymentId: string | null; onSelectDeployment: (id: string | null) => void }) {
   const [buildElapsed, setBuildElapsed] = useState<Record<string, number>>({});
 
+  const buildingDeployments = useMemo(
+    () => deployments?.filter(d => d.status === 'building' || d.status === 'deploying') ?? [],
+    [deployments]
+  );
+
   // Timer for build elapsed time
   useEffect(() => {
-    const buildingDeployments = deployments?.filter(
-      d => d.status === 'building' || d.status === 'deploying'
-    );
-
-    if (!buildingDeployments?.length) {
+    if (!buildingDeployments.length) {
       setBuildElapsed({});
       return;
     }
 
     const updateElapsed = () => {
       const now = Date.now();
-      const elapsed: Record<string, number> = {};
-      buildingDeployments.forEach(d => {
-        elapsed[d.id] = Math.floor((now - new Date(d.created_at).getTime()) / 1000);
-      });
-      setBuildElapsed(elapsed);
+      setBuildElapsed(
+        Object.fromEntries(
+          buildingDeployments.map(d => [d.id, Math.floor((now - new Date(d.created_at).getTime()) / 1000)])
+        )
+      );
     };
 
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [deployments]);
+  }, [buildingDeployments]);
 
   if (deployments.length === 0) {
     return (
