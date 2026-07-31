@@ -242,13 +242,16 @@ export default function NewServerPage() {
   // True while the active target's detection is actually in flight (false on a warm cache
   // hit); drives the skeletons so detected values slot in instead of popping.
   const detecting = !!detectTarget && detectQuery.isFetching;
-  // The inspect endpoint may return warnings with an otherwise successful response (for
-  // example when GitHub could not be read and no runtime was detected). Surface both that
-  // case and request failures instead of silently leaving the deploy fields empty.
+  // The inspect endpoint can return a successful response without the fields needed to
+  // deploy (for example when GitHub could not be read). Check the fields themselves rather
+  // than every warning: Docker detections intentionally include an informational warning.
   const detectionNeedsAttention =
     !!detectTarget &&
     !detecting &&
-    (detectQuery.isError || (detectQuery.data?.warnings.length ?? 0) > 0);
+    (detectQuery.isError ||
+      (!!detectQuery.data &&
+        (!detectQuery.data.runtime ||
+          (detectQuery.data.runtime !== 'docker' && !detectQuery.data.entry_command))));
 
   const generateSlug = useCallback((name: string) => {
     return name
