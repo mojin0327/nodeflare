@@ -242,6 +242,13 @@ export default function NewServerPage() {
   // True while the active target's detection is actually in flight (false on a warm cache
   // hit); drives the skeletons so detected values slot in instead of popping.
   const detecting = !!detectTarget && detectQuery.isFetching;
+  // The inspect endpoint may return warnings with an otherwise successful response (for
+  // example when GitHub could not be read and no runtime was detected). Surface both that
+  // case and request failures instead of silently leaving the deploy fields empty.
+  const detectionNeedsAttention =
+    !!detectTarget &&
+    !detecting &&
+    (detectQuery.isError || (detectQuery.data?.warnings.length ?? 0) > 0);
 
   const generateSlug = useCallback((name: string) => {
     return name
@@ -704,6 +711,23 @@ export default function NewServerPage() {
             <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-violet-50 border border-violet-100 text-violet-700">
               <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
               <span className="text-sm font-medium">{t('create.detecting')}</span>
+            </div>
+          )}
+
+          {detectionNeedsAttention && (
+            <div className="flex items-start gap-3 mb-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{t('create.detectionFailed')}</p>
+                <p className="text-xs mt-0.5 text-amber-700">{t('create.detectionFailedHelp')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => detectQuery.refetch()}
+                className="flex-shrink-0 text-xs font-medium text-amber-900 underline underline-offset-2 hover:text-amber-700"
+              >
+                {t('create.retryDetection')}
+              </button>
             </div>
           )}
 
