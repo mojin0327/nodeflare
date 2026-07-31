@@ -2,6 +2,9 @@
 /target/
 Cargo.lock
 
+# Local video assets
+my-launch-video/
+
 # Dependencies
 node_modules/
 
