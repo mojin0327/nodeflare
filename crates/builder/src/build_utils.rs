@@ -1590,7 +1590,13 @@ fn generate_stdio_dockerfile(
     // If there's an existing Dockerfile with an explicit entry command, use a
     // multi-stage build that preserves the original build process.
     if let (Some(dockerfile), Some(ref entry_cmd)) = (existing_dockerfile, &explicit_entry) {
-        return generate_stdio_dockerfile_with_existing(runtime, mcp_path, entry_cmd, dockerfile);
+        return generate_stdio_dockerfile_with_existing(
+            runtime,
+            mcp_path,
+            entry_cmd,
+            build_command,
+            dockerfile,
+        );
     }
 
     // Priority for entry command in the generated Dockerfiles below:
@@ -1766,7 +1772,13 @@ fn format_python_entry_command(cmd: &str) -> String {
 /// Generate STDIO Dockerfile that wraps an existing Dockerfile
 /// Uses multi-stage build: first stage builds using original Dockerfile,
 /// second stage adds Node.js and STDIO adapter
-fn generate_stdio_dockerfile_with_existing(_runtime: &str, mcp_path: &str, entry_command: &str, original_dockerfile: &str) -> String {
+fn generate_stdio_dockerfile_with_existing(
+    _runtime: &str,
+    mcp_path: &str,
+    entry_command: &str,
+    build_command: Option<&str>,
+    original_dockerfile: &str,
+) -> String {
     let mcp_path_escaped = dockerfile_env_value_escape(mcp_path);
     let mcp_path = mcp_path_escaped.as_str();
     // Standard port for STDIO adapter
@@ -1778,6 +1790,10 @@ fn generate_stdio_dockerfile_with_existing(_runtime: &str, mcp_path: &str, entry
 
     // Modify the original Dockerfile to be a named stage
     let app_stage = convert_to_named_stage(original_dockerfile, "app");
+    // A user-specified build command must still run when wrapping an existing
+    // Dockerfile. Run it in the app stage so it inherits that image's WORKDIR,
+    // dependencies, environment, and user rather than the adapter runtime setup.
+    let build_step = optional_build_step(build_command);
 
     // Extract ENV lines from original Dockerfile to preserve PATH and other settings.
     // `FROM app` already inherits the stage's ENV, but re-stating them is harmless and
@@ -1794,6 +1810,7 @@ fn generate_stdio_dockerfile_with_existing(_runtime: &str, mcp_path: &str, entry
 # Stage 1: Build using original Dockerfile
 # ============================================
 {app_stage}
+{build_step}
 
 # ============================================
 # Stage 2: Run the original image + STDIO adapter (Node.js)
@@ -1847,6 +1864,7 @@ EXPOSE {port}
 CMD ["node", "/app/stdio-adapter.cjs", {entry_cmd_json}]
 "#,
         app_stage = app_stage,
+        build_step = build_step,
         env_lines = env_lines,
         restore_user = extract_last_user(original_dockerfile),
         entry_cmd_json = format_entry_command_as_args(entry_command)
@@ -2557,7 +2575,7 @@ mod tests {
         // the relative entry command runs where nothing was built → ENOENT at runtime.
         let df = "FROM node:lts-alpine\nWORKDIR /usr/src/app\nCOPY . .\n\
                   RUN npm install --ignore-scripts && npm run build\nCMD [\"node\", \"dist/index.js\"]\n";
-        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", df);
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", None, df);
         // Stage 1 keeps the foreign WORKDIR so the build lands in /usr/src/app.
         assert!(out.contains("WORKDIR /usr/src/app"));
         // Stage 2 must not clobber it with a hardcoded `WORKDIR /app` instruction
@@ -2574,7 +2592,7 @@ mod tests {
         // `FROM app` already inherits the wrapped stage's ENV.
         let df = "FROM node:lts-alpine\nWORKDIR /usr/src/app\nCOPY . .\nRUN npm install\n\
                   CMD [\"node\", \"dist/index.js\"]\n";
-        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "node dist/index.js", df);
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "node dist/index.js", None, df);
         assert!(!out.contains("/app/node_modules/.bin"));
         assert!(!out.contains("/app/.venv/bin"));
     }
@@ -2585,8 +2603,28 @@ mod tests {
         // MCP_CLIENT_DOCKER) must still be carried into the runtime stage.
         let df = "FROM node:lts-alpine\nENV MCP_CLIENT_DOCKER=true\nWORKDIR /usr/src/app\n\
                   COPY . .\nRUN npm run build\nCMD [\"node\", \"dist/index.js\"]\n";
-        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", df);
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", None, df);
         assert!(out.contains("ENV MCP_CLIENT_DOCKER=true"));
+    }
+
+    #[test]
+    fn stdio_wrap_runs_custom_build_command_in_app_stage() {
+        let df = "FROM node:22-slim\nWORKDIR /srv\nCOPY . .\nCMD [\"node\", \"src/index.js\"]\n";
+        let out = generate_stdio_dockerfile_with_existing(
+            "node",
+            "/mcp",
+            "node dist/index.js",
+            Some("npm run generate && npm run build"),
+            df,
+        );
+
+        let build = out
+            .find("RUN npm run generate && npm run build")
+            .expect("custom build command should be emitted");
+        let runtime = out
+            .find("FROM app AS runtime")
+            .expect("runtime stage should exist");
+        assert!(build < runtime, "custom build must run in the app stage");
     }
 
     // ---- judgment B: COPY/ADD context-source parsing (pure) ----
