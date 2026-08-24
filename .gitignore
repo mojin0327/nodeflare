@@ -1,6 +1,5 @@
 # Rust
 /target/
-Cargo.lock
 
 # Local video assets
 my-launch-video/
