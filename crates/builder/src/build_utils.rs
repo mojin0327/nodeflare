@@ -2603,7 +2603,7 @@ mod tests {
         // MCP_CLIENT_DOCKER) must still be carried into the runtime stage.
         let df = "FROM node:lts-alpine\nENV MCP_CLIENT_DOCKER=true\nWORKDIR /usr/src/app\n\
                   COPY . .\nRUN npm run build\nCMD [\"node\", \"dist/index.js\"]\n";
-        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", df);
+        let out = generate_stdio_dockerfile_with_existing("node", "/mcp", "npm start", None, df);
         assert!(out.contains("ENV MCP_CLIENT_DOCKER=true"));
     }
 
