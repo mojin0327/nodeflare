@@ -7,6 +7,8 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "crates/**"
+      - ".github/scripts/write_verification_receipt.py"
+      - ".github/verification-receipt.schema.json"
       - ".github/workflows/builder-ci.yml"
   push:
     branches:
@@ -16,6 +18,8 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "crates/**"
+      - ".github/scripts/write_verification_receipt.py"
+      - ".github/verification-receipt.schema.json"
       - ".github/workflows/builder-ci.yml"
 
 permissions:
@@ -50,4 +54,39 @@ jobs:
             ${{ runner.os }}-cargo-builder-
 
       - name: Run builder tests
+        id: builder-tests
+        continue-on-error: true
         run: cargo test --locked -p mcp-builder
+
+      - name: Write verification receipt
+        if: always()
+        env:
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REF: ${{ github.ref }}
+          TEST_OUTCOME: ${{ steps.builder-tests.outcome }}
+        run: |
+          python3 .github/scripts/write_verification_receipt.py
+          python3 -m json.tool verification-receipt.json > /dev/null
+
+      - name: Upload verification receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: builder-verification-receipt-${{ github.run_id }}
+          path: verification-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Preserve builder test result
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.builder-tests.outcome }}
+        run: test "$TEST_OUTCOME" = "success"
